@@ -1,5 +1,5 @@
 /* ==== AUTO-GENERATED EVENT-HANDLER WRAPPERS (CSP-compliant, replaces inline on* attributes) ==== */
-function __h1(event, ) { checkPin(this.value) }
+// 2026-11-26：PIN 锁屏功能已完整删除，__h1（锁屏输入处理）一并删除。
 function __h2(event, ) { toggleSidebar() }
 function __h3(event, ) { checkForUpdate(true) }
 function __h4(event, ) { toggleDetailSidebar() }
@@ -98,9 +98,9 @@ function __h108(event, ) { libCardDragOver(event) }
 function __h109(event, __P0__) { libCardDrop(__P0__, event) }
 function __h110(event, ) { this.style.display='none';this.nextElementSibling.style.display='flex'; }
 function __h111(event, __P0__) { copySingleLink(__P0__) }
-function __h112(event, __P0__) { window.open(__P0__) }
+function __h112(event, __P0__) { openExternalLink(__P0__) }
 function __h113(event, __P0__) { removeLink(__P0__) }
-function __h114(event, __P0__) { window.open(__P0__) }
+function __h114(event, __P0__) { openExternalLink(__P0__) }
 function __h115(event, __P0__, __P1__) { openGallery(__P0__, __P1__) }
 function __h116(event, __P0__) { event.stopPropagation();pinShot(__P0__) }
 function __h117(event, __P0__) { event.stopPropagation();deleteShot(__P0__) }
@@ -151,7 +151,6 @@ function __h156(event, ) { dismissThumbSuggest() } // 🆕 2026-11-26：超 1GB 
 function __h157(event, ) { remindThumbSuggestLater() } // 🆕 2026-11-26：超 1GB 弹窗——下次再提醒（只关这次）
 
 window.__Handlers = {
-  __h1: __h1,
   __h2: __h2,
   __h3: __h3,
   __h4: __h4,

@@ -54,22 +54,6 @@ a { color: var(--txac); text-decoration: none; }
 ::-webkit-scrollbar-thumb:hover { background: var(--bds); }
 
 /* ═══════════════════════════════════════════════════════
-   SECURITY LOCK SCREEN (访问密码锁屏幕)
-═══════════════════════════════════════════════════════ */
-#lock-screen {
-  position: fixed; top: 0; right: 0; bottom: 0; left: 0; background: var(--s0); z-index: 99999;
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  display: none;
-}
-#pin-input {
-  font-size: 32px; letter-spacing: 16px; text-align: center; width: 280px; height: 60px;
-  background: transparent; border: none; border-bottom: 2px solid var(--ac);
-  color: var(--tx); margin-top: 20px; outline: none; padding: 10px; border-radius: 0;
-  font-family: monospace; transition: border-color 0.2s;
-}
-#pin-input.error { border-color: var(--dr); color: var(--dr); }
-
-/* ═══════════════════════════════════════════════════════
    APP LAYOUT & TOPBAR (顶栏结构与组件)
 ═══════════════════════════════════════════════════════ */
 #app { display: flex; flex-direction: column; height: 100vh; }
@@ -548,14 +532,6 @@ a { color: var(--txac); text-decoration: none; }
 </head>
 
 <body>
-
-<!-- 🔒 PIN 密码锁屏界面 -->
-<div id="lock-screen">
-  <i class="ti ti-lock-square-rounded" style="font-size:72px; color:var(--txm); margin-bottom:24px;"></i>
-  <h2 style="margin-bottom:12px; font-size: 24px; color:var(--tx);">数据库已被锁定</h2>
-  <p style="font-size:13px; color:var(--txm); margin-bottom:40px;">请输入 4-6 位安全 PIN 码访问工作区</p>
-  <input type="password" id="pin-input" maxlength="6" autofocus data-act="__h1" data-evt="input" data-act-args="[]" placeholder="••••••">
-</div>
 
 <!-- 🚀 APP 主容器 -->
 <div id="app">

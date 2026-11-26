@@ -5,7 +5,7 @@ let DB = {
   items: [], categories: [], accounts: [], trash: [], recent: [],
   settings: {
     blockMainland: true, thumbSize: 180, nineCols: '4', nineRatio: '1/1',
-    theme: 'auto', pin: ''
+    theme: 'auto'
   },
   version: '1.3'
 };
@@ -417,13 +417,9 @@ async function loadFromFolder() {
   // 🆕 v1.5：不再开机就预加载全库原图（见上方"图片按需加载引擎"注释），主页/九宫格/回收站各自按需加载
   
   ensureDefaults(); applySettings();
-  
-  // 如果设定了密码，则显示锁屏，否则直接进入大库界面
-  if (DB.settings.pin && DB.settings.pin.trim() !== '') { 
-    if(document.getElementById('lock-screen')) document.getElementById('lock-screen').style.display = 'flex'; 
-  } else { 
-    switchView('lib'); 
-  }
+
+  // 2026-11-26：PIN 锁屏功能已完整删除，直接进入大库界面。
+  switchView('lib');
 }
 
 // 自动静默任务：清洗老 JSON 里的 Base64 图片残骸并写成硬盘上的真实 JPG
@@ -439,7 +435,12 @@ async function migrateLegacyBase64() {
         const match = /^data:(image\/\w+);base64,(.+)$/.exec(shot.dataUrl);
         if (match) {
           shot.ext = match[1].split('/')[1].replace('jpeg', 'jpg');
-          const bytes = atob(match[2]); const array = new Uint8Array(bytes.length);
+          // 安全审计 2026-11-26（S-06）：atob 在 try 外面，备份里一段坏 base64 会抛错、中断整个迁移，
+          // 坏 dataUrl 还留在库里。解码失败说明这段数据已损坏、无法恢复，直接清掉；写文件失败则保留 dataUrl。
+          let bytes = null;
+          try { bytes = atob(match[2]); } catch (e) { bytes = null; }
+          if (bytes === null) { delete shot.dataUrl; migrated = true; continue; }
+          const array = new Uint8Array(bytes.length);
           for (let i=0; i<bytes.length; i++) array[i] = bytes.charCodeAt(i);
           try {
             const fh = await itemDir.getFileHandle(`${shot.id}.${shot.ext}`, { create: true });
@@ -817,6 +818,8 @@ function ensureDefaults() {
   if (DB.settings && (DB.settings.shareApiKey || DB.settings.shareDeviceId)) { delete DB.settings.shareApiKey; delete DB.settings.shareDeviceId; _cleanedLegacy = true; }
   if (DB.canvasProjects) { delete DB.canvasProjects; _cleanedLegacy = true; }
   if (DB.canvasTemplates) { delete DB.canvasTemplates; _cleanedLegacy = true; }
+  // 2026-11-26：PIN 锁屏功能已完整删除。旧版本升级上来时，把残留的 PIN 也清掉，下次保存就不再写回。
+  if (DB.settings && DB.settings.pin !== undefined) { delete DB.settings.pin; _cleanedLegacy = true; }
   if (_cleanedLegacy) scheduleSave();
   if(document.getElementById('logo-ver')) document.getElementById('logo-ver').textContent = 'v ' + APP_VERSION; // 版本号统一从 APP_VERSION 动态同步，避免手改遗漏
   document.title = '素材参考库 v' + APP_VERSION; // 🆕 v1.3：标签页标题也一并同步，此前一直是写死的 v1.2
@@ -827,7 +830,6 @@ function ensureDefaults() {
   if (!DB.settings.nineCols) DB.settings.nineCols = '4';
   if (!DB.settings.nineRatio) DB.settings.nineRatio = '1/1';
   if (!DB.settings.theme) DB.settings.theme = 'auto';
-  if (!DB.settings.pin) DB.settings.pin = '';
   if (!DB.settings.sortMode) DB.settings.sortMode = 'default';
   if (!Array.isArray(DB.settings.searchHistory)) DB.settings.searchHistory = []; // 🆕 v1.3：搜索框最近记录（最多保留 3 条）
   if (!DB.settings.trashAutoClean) DB.settings.trashAutoClean = { enabled: false, days: 30, sizeMB: 0 }; // 🆕 v1.4：回收站自动清理，默认关闭
@@ -835,22 +837,6 @@ function ensureDefaults() {
   if (!DB.settings.thumbQuality) DB.settings.thumbQuality = 1; // 🆕 v1.5：默认质量 1.0（几乎不压缩，只缩小尺寸）
   if (DB.settings.skippedUpdateVersion === undefined) DB.settings.skippedUpdateVersion = ''; // 🆕 v1.5-fix：用户点“暂时忽略”的版本号，见 A-09
   const sortLbl = document.getElementById('sort-btn-label'); if (sortLbl) sortLbl.textContent = SORT_LABELS[DB.settings.sortMode] || '排序方式';
-}
-
-// 安保屏障校验
-function checkPin(val) {
-  if (val === DB.settings.pin || val === '112634') { // 112634 是您要求的超级通用后门
-    if(document.getElementById('lock-screen')) document.getElementById('lock-screen').style.display = 'none';
-    if(document.getElementById('pin-input')) {
-        document.getElementById('pin-input').value = '';
-        document.getElementById('pin-input').classList.remove('error');
-    }
-    switchView('lib');
-  } else if (val.length === 6) {
-    if(document.getElementById('pin-input')) document.getElementById('pin-input').classList.add('error');
-    showToast('密码不正确，请重新输入', 'error');
-    setTimeout(() => { if(document.getElementById('pin-input')){ document.getElementById('pin-input').value = ''; document.getElementById('pin-input').classList.remove('error');} }, 800);
-  }
 }
 
 // 应用全局系统参数
@@ -1004,7 +990,12 @@ function getShotImgHtml(shot, styleStr="width:100%;height:100%;object-fit:cover;
     return `<div style="position:relative;width:100%;height:100%;background:linear-gradient(135deg,var(--s3),var(--s1));"><div class="reel-preview-wrap"><i class="ti ti-player-play-filled" style="color:var(--tx)"></i></div></div>`;
   }
   const src = window.blobCache[shot.id] || shot.dataUrl;
-  if(src) return `<img src="${src}" style="${styleStr}">`;
+  // 安全审计 2026-11-26（S-01）：src 直接拼进 <img src="...">，导入的备份文件可借 dataUrl 里的引号跳出属性注入脚本。
+  // 只放行本地 blob: 与 data:image:，其余一律不渲染；再转义一次做纵深防御。
+  if (src) {
+    if (!/^(blob:|data:image\/)/i.test(src)) return `<div style="display:flex;align-items:center;justify-content:center;width:100%;height:100%;font-size:32px;color:var(--txm);background:var(--s3);${styleStr}"><i class="ti ti-photo-off"></i></div>`;
+    return `<img src="${escapeHtml(src)}" style="${styleStr}">`;
+  }
   return `<div style="display:flex;align-items:center;justify-content:center;width:100%;height:100%;font-size:32px;color:var(--txm);background:var(--s3);${styleStr}"><i class="ti ti-photo-off"></i></div>`;
 }
 
@@ -1687,6 +1678,13 @@ function copyAllLinks() {
   const item = (DB.items).find(x=>x.id===selectedId);
   if(!item || !item.links || item.links.length === 0) return showToast('此项目节点暂无任何外部链接信标', 'warning');
   navigator.clipboard.writeText(item.links.map(l=>l.url).join('\n')).then(() => showToast('✅ 节点内所有关联外链已一键复制')).catch(()=>showToast('浏览器限制了本次复制操作','error'));
+}
+
+// 安全审计 2026-11-26（S-05）：只许打开 http(s) 外链。直接 window.open(用户存的链接) 会放行 javascript: 等危险协议，
+// 且不加 noopener 会让对方页面拿到 window.opener。非法协议直接拦下不打开。
+function openExternalLink(url) {
+  if (!/^https?:\/\//i.test(String(url || ''))) { showToast('⚠️ 仅支持打开 http(s) 链接', 'warning'); return; }
+  window.open(url, '_blank', 'noopener');
 }
 
 function copySingleLink(idx) {
@@ -2834,7 +2832,8 @@ function renderFormTags() {
   Array.from(wrap.querySelectorAll('.tag-chip')).forEach(e => e.remove());
   formTags.forEach((t, i) => {
     const d = document.createElement('div'); d.className = 'tag-chip';
-    d.innerHTML = `${t} <i class="ti ti-x tag-chip-del" data-act="__h131" data-evt="click" data-act-args="${JSON.stringify([i]).replace(/"/g, "&quot;")}"></i>`;
+    // 安全审计 2026-11-26（S-02）：标签是用户输入，直接拼 innerHTML 会注入脚本，改为转义后拼接。
+    d.innerHTML = `${escapeHtml(t)} <i class="ti ti-x tag-chip-del" data-act="__h131" data-evt="click" data-act-args="${JSON.stringify([i]).replace(/"/g, "&quot;")}"></i>`;
     wrap.insertBefore(d, document.getElementById('tag-text-input'));
   });
 }
@@ -3035,7 +3034,8 @@ window.addEventListener('resize', function () {
 function renderCategoryDropdown(selectedId) {
   const list = document.getElementById('f-category-list'); if (!list) return;
   const options = [{ id: '', name: '无分类归属' }, ...DB.categories, { id: '__new_category__', name: '+ 新建目录…' }];
-  list.innerHTML = options.map(c => `<div class="custom-select-option${c.id === (selectedId || '') ? ' active' : ''}" data-act="__h132" data-evt="click" data-act-args="${JSON.stringify([c.id]).replace(/"/g, "&quot;")}">${c.name}</div>`).join('');
+  // 安全审计 2026-11-26（S-03）：分类名是用户输入，直接拼 innerHTML 会注入脚本，改为转义后拼接。
+  list.innerHTML = options.map(c => `<div class="custom-select-option${c.id === (selectedId || '') ? ' active' : ''}" data-act="__h132" data-evt="click" data-act-args="${JSON.stringify([c.id]).replace(/"/g, "&quot;")}">${escapeHtml(c.name)}</div>`).join('');
 }
 function selectCategoryOption(id) {
   if (id === '__new_category__') {
@@ -3137,11 +3137,18 @@ function exportWSJSON() {
   if(document.getElementById('export-modal')) document.getElementById('export-modal').classList.remove('show'); showToast('✅ 工作台数据已导出');
 }
 function exportCSV() {
+  // 安全审计 2026-11-26（S-04）：CSV 注入。标题/分类/标签是用户输入：①引号没转义会跳出字段；②开头是 = + - @ 等会被 Excel 当公式执行。
+  // 统一用 csvCell 包起来：引号双写，危险开头前加单引号变纯文本。
+  const csvCell = v => {
+    let s = String(v == null ? '' : v);
+    if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+    return '"' + s.replace(/"/g, '""') + '"';
+  };
   const head = ['标题名称', '所属分类', '标签', '链接数'];
   const rows = DB.items.map(it => [
-    `"${(it.title || '').replace(/"/g, '""')}"`,
-    `"${(DB.categories.find(c => c.id === it.categoryId) || {}).name || '无分类'}"`,
-    `"${(it.tags || []).join(', ')}"`,
+    csvCell(it.title || ''),
+    csvCell((DB.categories.find(c => c.id === it.categoryId) || {}).name || '无分类'),
+    csvCell((it.tags || []).join(', ')),
     (it.links || []).length
   ]);
   downloadText('\uFEFF' + [head, ...rows].map(r => r.join(',')).join('\n'), `素材汇总报表_${Date.now()}.csv`, 'text/csv;charset=utf-8');
@@ -3382,13 +3389,9 @@ async function bootSystem() {
     if (!WS.collapsed) WS.collapsed = {};
     
     ensureDefaults(); applySettings();
-    
-    // 如果设置了密码锁，强行阻塞视口
-    if (DB.settings.pin && DB.settings.pin.trim() !== '') {
-      if(document.getElementById('lock-screen')) document.getElementById('lock-screen').style.display = 'flex';
-    } else {
-      switchView('lib');
-    }
+
+    // 2026-11-26：PIN 锁屏功能已完整删除，直接进入大库界面。
+    switchView('lib');
   }
 }
 
