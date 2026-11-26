@@ -35,8 +35,26 @@
   }
 
   function dispatch(evtType, e) {
+    // 右键：先拦浏览器原生菜单（再早都不行——处理函数一旦抛错，原生菜单就会漏出来）。
+    // 输入框里不动，保留系统复制粘贴菜单。
+    if (evtType === 'contextmenu') {
+      var t = e.target;
+      var inTextField = t && t.closest && t.closest('input, textarea, [contenteditable="true"]');
+      if (inTextField) return;
+      e.preventDefault();
+    }
     var binding = findBinding(e.target, evtType);
-    if (!binding) return;
+    if (!binding) {
+      // 右键点了没有任何绑定处理的地方：也不许出原生菜单，
+      // 一律回落到主界面空白处菜单（新建分类目录 / 登记全新素材）。
+      // 正在显示的菜单、弹窗里不弹新菜单，只拦原生。
+      if (evtType === 'contextmenu') {
+        var t2 = e.target;
+        if (t2 && t2.closest && (t2.closest('.ctx-menu') || t2.closest('.modal-overlay, .modal'))) return;
+        if (typeof window.showContextMenu === 'function') window.showContextMenu(e, 'ctx-grid');
+      }
+      return;
+    }
     var el = binding.el, suf = binding.suffix;
     var name = el.getAttribute('data-act' + suf);
     var fn = window.__Handlers && window.__Handlers[name];

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "素材参考库",
-  "version": "1.2.0",
-  "description": "本地优先的素材/链接参考资料库：分类管理、九宫格排版预览、截图画廊、Facebook/YouTube 链接解析与本地硬盘直读直写。",
+  "version": "1.5.0",
+  "description": "把灵感收进自己的素材库：分类、九宫格、截图画廊一应俱全，原图只存本地硬盘。",
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",
@@ -27,10 +27,10 @@
   ],
   "host_permissions": [
     "https://api.github.com/*",
-    "https://graph.facebook.com/*",
     "https://i.ytimg.com/*"
   ],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self';"
-  }
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqOxpWAWZH0FaZuKrFGNd4hKgOFWbAnOFkzE3F07glb98WOv8LNCzdup7Xxb3VAuwUpjjFeBAziZ+uU9zC/mkWqlgTifFA0nU29Y+yUsW3ujhuzM8zqPw+rgbohCl25S2+9NdjbU2rJhE2I4vwnUbiRF1Qc22Crz07Q7DEpUKcosC/oFeVyiqEieO2ET0TfAPaD/TMvHoqhVCbfm034sBlrey6m54o8VfyapRjOtRs+tbzjBNXBj89nFC8Vbn6hpGS9fAORj5ANR+/dSc/qJfxTDBIDDonUuXdfr8CwJpdIRK+QB2y45fj6g4izrpqZz2hgLHrmsBhdC6ioimcBfp9wIDAQAB"
 }
