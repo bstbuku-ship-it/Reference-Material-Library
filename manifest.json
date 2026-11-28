@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "素材参考库",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "把灵感收进自己的素材库：分类、九宫格、截图画廊一应俱全，原图只存本地硬盘。",
   "icons": {
     "16": "icons/icon-16.png",

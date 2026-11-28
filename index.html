@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>素材参考库 v1.3</title>
+<title>素材参考库 v1.6.0</title>
 <link rel="icon" type="image/png" href="icons/icon-32.png">
 <link rel="stylesheet" href="lib/tabler-icons.min.css">
 <style>
@@ -36,6 +36,9 @@
   --shadow: 0 1px 4px rgba(0,0,0,0.3), 0 0 0 0.5px rgba(255,255,255,0.05);
   --shadow-lg: 0 4px 20px rgba(0,0,0,0.4), 0 0 0 0.5px rgba(255,255,255,0.05);
 }
+
+/* 2026-11-27：深色模式下设置里的副标题太暗看不清，只提亮设置窗口内用 --txm 的文字（副标题／分区小标题／图标），主界面不动 */
+.dark #settings-modal { --txm: #b3ada0; }
 
 /* ═══════════════════════════════════════════════════════
    RESET & BASE (基础重置)
@@ -106,6 +109,20 @@ a { color: var(--txac); text-decoration: none; }
 #lib-batch-bar #lib-batch-count { font-size: 12px; font-weight: 600; color: var(--tx); padding-left: 6px; }
 .lib-batch-divider { width: .5px; height: 18px; background: var(--bd); }
 #lib-batch-bar .btn { height: 30px; font-size: 12px; }
+
+/* 2026-11-27：批量操作条按主题换样式（Whitaker 选的：浅色用方案四，深色用方案三） */
+/* 方案四（浅色）：浅蓝底，合并按钮用主题蓝 #1860a8 实底白字 */
+body.light #lib-batch-bar { background: #deebfb; border-color: #bcd7f3; box-shadow: 0 6px 24px rgba(24,96,168,0.18), 0 0 0 0.5px rgba(24,96,168,0.08); }
+body.light #lib-batch-bar #lib-batch-count { color: #173a5e; }
+body.light .lib-batch-divider { background: rgba(24,96,168,0.28); }
+body.light #lib-batch-bar .batch-merge { background: var(--ac); border-color: transparent; color: #fff; }
+body.light #lib-batch-bar .batch-merge:hover { background: var(--ac); opacity: .88; }
+/* 方案三（深色）：炭黑悬浮胶囊，合并按钮琥珀色实底 */
+body.dark #lib-batch-bar { background: #141413; border-color: rgba(255,255,255,0.14); box-shadow: 0 12px 32px rgba(0,0,0,0.6), 0 0 0 0.5px rgba(255,255,255,0.06); }
+body.dark #lib-batch-bar #lib-batch-count { color: #e5e3dc; }
+body.dark .lib-batch-divider { background: rgba(255,255,255,0.16); }
+body.dark #lib-batch-bar .batch-merge { background: var(--am); border-color: transparent; color: #241a05; }
+body.dark #lib-batch-bar .batch-merge:hover { background: var(--am); opacity: .88; }
 
 /* 🆕 2026-11-26：空白处框选的橡皮筋框 */
 #lib-marquee { position: fixed; border: 1px solid var(--ac); background: rgba(180, 130, 60, 0.12); pointer-events: none; z-index: 300; }
@@ -321,9 +338,9 @@ a { color: var(--txac); text-decoration: none; }
 /* ═══════════════════════════════════════════════════════
    NINE GRID MODAL (画廊高级交互模式 - 无复选框)
 ═══════════════════════════════════════════════════════ */
-#nine-grid-modal .modal { width: 96vw; max-width: 1800px; height: 95vh; display: flex; flex-direction: column; background: var(--s1); }
+#nine-grid-modal .modal { width: 96vw; max-width: 1800px; height: 95vh; display: flex; flex-direction: column; background: var(--s1); overflow: hidden; /* 2026-11-27：画廊四个角稍微倒圆角——.modal 本来就有 12px 圆角，但没裁剪，顶栏和内容区的方角底色盖住了圆角，看着还是直角，这里裁一下就露出圆角了 */ }
 #nine-grid-modal .modal-header { background: var(--s2); }
-#nine-container { display: grid; gap: 16px; overflow-y: auto; padding: 20px; align-content: start; user-select: none; }
+#nine-container { display: grid; gap: 16px; overflow-y: auto; padding: 20px; align-content: start; user-select: none; min-height: 100%; /* 2026-11-27：容器原来只有内容那么高，下面空白处不在容器里、框选从那起不了框；撑满弹窗后整个放图区域都能起框 */ }
 
 .nine-item {
   position: relative; border-radius: var(--radius-sm); border: 2px solid transparent;
@@ -335,15 +352,16 @@ a { color: var(--txac); text-decoration: none; }
 .nine-item img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.2s ease-out; pointer-events: none; }
 .nine-item:hover { border-color: var(--bds); transform: translateY(-2px); box-shadow: var(--shadow-lg); }
 
-/* 光环选中态 (不使用复选框) */
-.nine-item.nine-selected { border-color: var(--ac); box-shadow: 0 0 0 4px rgba(24,96,168,0.3); transform: translateY(0) scale(0.96); }
-.nine-item.nine-selected img { transform: scale(1.05); filter: brightness(0.9); }
+/* 选中态加深（2026-11-27 第 27 条：旧样式太淡，真机照片上看不出框住了哪几张）：
+   实色边框＋实色光环＋外圈淡光、图再暗一点、打钩加大加白圈，浅色深色都显眼 */
+.nine-item.nine-selected { border-color: var(--ac); box-shadow: 0 0 0 3px var(--ac), 0 0 0 7px rgba(24,96,168,0.3); transform: translateY(0) scale(0.96); }
+.nine-item.nine-selected img { transform: scale(1.05); filter: brightness(0.7); }
 
 /* 右上角打钩图标 */
 .nine-sel-icon {
-  position: absolute; top: 10px; right: 10px; width: 26px; height: 26px;
-  background: var(--ac); color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center;
-  font-size: 14px; opacity: 0; transform: scale(0.8); transition: all .15s; z-index: 10; pointer-events: none; box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+  position: absolute; top: 10px; right: 10px; width: 32px; height: 32px;
+  background: var(--ac); color: #fff; border: 2px solid #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-size: 18px; opacity: 0; transform: scale(0.8); transition: all .15s; z-index: 10; pointer-events: none; box-shadow: 0 2px 8px rgba(0,0,0,0.5);
 }
 .nine-item.nine-selected .nine-sel-icon { opacity: 1; transform: scale(1); }
 
@@ -407,7 +425,7 @@ a { color: var(--txac); text-decoration: none; }
 #lightbox { position: fixed; top: 0; right: 0; bottom: 0; left: 0; background: rgba(0,0,0,0.92); display: flex; align-items: center; justify-content: center; z-index: 2000; opacity: 0; pointer-events: none; transition: opacity .2s; backdrop-filter: blur(5px); }
 #lightbox.show { opacity: 1; pointer-events: all; }
 /* 图片整体上移，避免与下方缩略图预览条重叠遮挡；同时支持鼠标滚轮缩放查看细节 */
-#lightbox-img { max-width: 88vw; max-height: 76vh; margin-bottom: 90px; object-fit: contain; border-radius: var(--radius-sm); box-shadow: 0 10px 40px rgba(0,0,0,0.5); transform: scale(1); transform-origin: center center; cursor: zoom-in; }
+#lightbox-img { max-width: 88vw; max-height: 76vh; margin-bottom: 90px; object-fit: contain; border-radius: var(--radius-sm); box-shadow: 0 10px 40px rgba(0,0,0,0.5); transform: scale(1); transform-origin: center center; cursor: zoom-in; user-select: none; -webkit-user-drag: none; touch-action: none; }
 
 #lightbox-close { position: absolute; top: 24px; right: 24px; width: 44px; height: 44px; background: rgba(255,255,255,0.15); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; cursor: pointer; font-size: 24px; transition: background .15s; z-index: 10; }
 #lightbox-close:hover { background: var(--dr); transform: scale(1.1); }
@@ -427,6 +445,8 @@ a { color: var(--txac); text-decoration: none; }
    MODALS, MENUS, TOASTS (全套弹窗与右键菜单)
 ═══════════════════════════════════════════════════════ */
 .modal-overlay { position: fixed; top: 0; right: 0; bottom: 0; left: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; opacity: 0; pointer-events: none; transition: opacity .2s; backdrop-filter: blur(4px); }
+/* 2026-11-27：上层弹窗的遮罩更浅且不模糊，下面的设置弹窗还看得见、只是变灰；分层 z-index 由 JS 按打开顺序算 */
+.modal-overlay.modal-child { background: rgba(0,0,0,0.32); backdrop-filter: none; }
 .modal-overlay.show { opacity: 1; pointer-events: all; }
 .modal { background: var(--s2); border-radius: var(--radius); width: 520px; max-width: 95vw; max-height: 85vh; display: flex; flex-direction: column; box-shadow: var(--shadow-lg); transform: translateY(10px); transition: transform .2s; }
 .modal-overlay.show .modal { transform: translateY(0); }
@@ -543,7 +563,7 @@ a { color: var(--txac); text-decoration: none; }
     <div id="logo">
       <img src="icons/icon-48.png" id="logo-icon" alt="logo">
       <span id="logo-name">素材参考库</span>
-      <span id="logo-ver" title="点击手动检测更新" data-act="__h3" data-evt="click" data-act-args="[]" style="cursor:pointer;">v 1.4</span>
+      <span id="logo-ver" title="点击手动检测更新" data-act="__h3" data-evt="click" data-act-args="[]" style="cursor:pointer;">v 1.6.0</span>
     </div>
     <div id="search-wrap">
       <i class="ti ti-search"></i>
@@ -663,7 +683,7 @@ a { color: var(--txac); text-decoration: none; }
           <div id="lib-batch-bar">
             <span id="lib-batch-count">已选 0 项</span>
             <div class="lib-batch-divider"></div>
-            <button class="btn" data-act="__h135" data-evt="click" data-act-args="[]"><i class="ti ti-copy"></i> 合并</button>
+            <button class="btn batch-merge" data-act="__h135" data-evt="click" data-act-args="[]"><i class="ti ti-copy"></i> 合并</button>
             <button class="btn danger" data-act="__h136" data-evt="click" data-act-args="[]"><i class="ti ti-trash"></i> 批量删除</button>
             <button class="btn" data-act="__h137" data-evt="click" data-act-args="[]"><i class="ti ti-x"></i> 取消选择</button>
           </div>
@@ -794,7 +814,7 @@ a { color: var(--txac); text-decoration: none; }
 <div id="lightbox">
   <div id="lightbox-close" data-act="__h50" data-evt="click" data-act-args="[]"><i class="ti ti-x"></i></div>
   <div id="lightbox-prev" class="lb-nav-btn" data-act="__h51" data-evt="click" data-act-args="[]"><i class="ti ti-chevron-left"></i></div>
-  <img id="lightbox-img" src="" alt="" data-act="__h52" data-evt="click" data-act-args="[]">
+  <img id="lightbox-img" src="" alt="" draggable="false" data-act="__h52" data-evt="click" data-act-args="[]">
   <div id="lightbox-next" class="lb-nav-btn" data-act="__h53" data-evt="click" data-act-args="[]"><i class="ti ti-chevron-right"></i></div>
   <div id="lightbox-counter"></div>
   <div id="lightbox-strip"></div>
@@ -863,7 +883,7 @@ a { color: var(--txac); text-decoration: none; }
     <div class="modal-body">
       <div class="set-nav">
         <div class="set-nav-item active" data-act="__h150" data-evt="click" data-act-args="[]" data-tab="theme"><i class="ti ti-settings"></i> 外观主题</div>
-        <div class="set-nav-item" data-act="__h150" data-evt="click" data-act-args="[]" data-tab="image"><i class="ti ti-photo"></i> 图片过滤</div>
+        <div class="set-nav-item" data-act="__h150" data-evt="click" data-act-args="[]" data-tab="image"><i class="ti ti-photo"></i> 图片加载</div>
         <div class="set-nav-item" data-act="__h150" data-evt="click" data-act-args="[]" data-tab="trash"><i class="ti ti-recycle"></i> 回收站</div>
         <div class="set-nav-item" data-act="__h150" data-evt="click" data-act-args="[]" data-tab="data"><i class="ti ti-device-floppy"></i> 数据与备份</div>
         <div class="set-nav-item" data-act="__h150" data-evt="click" data-act-args="[]" data-tab="about"><i class="ti ti-info-circle"></i> 关于</div>
@@ -882,25 +902,26 @@ a { color: var(--txac); text-decoration: none; }
           </div>
         </div>
         <div class="set-panel" id="set-panel-image">
-          <div class="set-row">
-            <div>
-              <div class="set-label">缩略图</div>
-              <div class="set-desc">当资源超过1GB时建议打开，打开后卡片和九宫格用压缩小图，滚动更快，放大和导出还是原图，第一次要多等几秒建缓存。</div>
-            </div>
-            <div class="set-control">
-              <div class="switch" id="set-thumb-enabled" data-act="__h143" data-evt="click" data-act-args="[]"></div>
-            </div>
-          </div>
           <div class="set-row" id="thumb-quality-row">
-            <div><div class="set-label">缩略图质量</div><div class="set-desc">数值越低文件越小、加载越快，但可能会有点糊；1.0 基本看不出压缩痕迹。</div></div>
+            <div><div class="set-label">图片质量</div><div class="set-desc">选“原图”直接显示原图；选数字用压缩小图，数值越低文件越小、加载越快，1.0 基本看不出压缩痕迹。</div></div>
             <div class="set-control">
               <select class="form-select" id="set-thumb-quality" style="width:150px;" data-act="__h144" data-evt="change" data-act-args="[]">
+                <option value="orig">原图（无压缩）</option>
                 <option value="1">1.0（最清晰）</option>
                 <option value="0.9">0.9（清晰）</option>
                 <option value="0.8">0.8（均衡）</option>
                 <option value="0.7">0.7（省空间）</option>
                 <option value="0.5">0.5（最省空间）</option>
               </select>
+            </div>
+          </div>
+          <div class="set-row">
+            <div>
+              <div class="set-label">节省内存</div>
+              <div class="set-desc">打开后详情只加载封面，打开画廊才加载剩下的图片，图片多也不卡。默认关闭。</div>
+            </div>
+            <div class="set-control">
+              <div class="switch" id="set-memory-enabled" data-act="__h143" data-evt="click" data-act-args="[]"></div>
             </div>
           </div>
         </div>
@@ -956,7 +977,7 @@ a { color: var(--txac); text-decoration: none; }
                 <i class="ti ti-upload" style="color:var(--gr)"></i> 数据导入
               </button>
               <button class="btn" style="flex:1;min-width:130px;height:36px;justify-content:center;" data-act="__h70" data-evt="click" data-act-args="[]">
-                <i class="ti ti-download" style="color:var(--am)"></i> 报表导出
+                <i class="ti ti-download" style="color:var(--am)"></i> 数据导出
               </button>
             </div>
           </div>
@@ -964,7 +985,11 @@ a { color: var(--txac); text-decoration: none; }
         <div class="set-panel" id="set-panel-about">
           <div class="set-row">
             <div><div class="set-label">素材参考库</div><div class="set-desc">本地优先的素材参考资料库。</div></div>
-            <div class="set-control"><span id="set-about-ver">v1.5.0</span></div>
+            <div class="set-control"><span id="set-about-ver">v1.6.0</span></div>
+          </div>
+          <div class="set-row">
+            <div><div class="set-label">更新日志</div><div class="set-desc">看看每个版本改了什么。</div></div>
+            <div class="set-control"><button class="btn" style="height:28px;" data-act="__h158" data-evt="click" data-act-args="[]">查看更新日志</button></div>
           </div>
           <div class="set-row">
             <div><div class="set-label">检查更新</div><div class="set-desc">看看有没有新版本。</div></div>
@@ -1000,7 +1025,7 @@ a { color: var(--txac); text-decoration: none; }
   <div class="modal" style="width:420px;">
     <div class="modal-header">
       <i class="ti ti-alert-triangle" style="color:#e0693b;font-size:20px;margin-right:8px"></i>
-      <span class="modal-title">删除操作</span>
+      <span class="modal-title" id="generic-confirm-title">删除操作</span>
       <div class="modal-close" data-act="__h154" data-evt="click" data-act-args="[]"><i class="ti ti-x"></i></div>
     </div>
     <div class="modal-body">
@@ -1008,7 +1033,7 @@ a { color: var(--txac); text-decoration: none; }
     </div>
     <div class="modal-footer" style="gap:8px;">
       <button class="btn" data-act="__h154" data-evt="click" data-act-args="[]">取消</button>
-      <button class="btn danger" data-act="__h153" data-evt="click" data-act-args="[]"><i class="ti ti-trash"></i> 确定删除</button>
+      <button class="btn danger" id="generic-confirm-btn" data-act="__h153" data-evt="click" data-act-args="[]"><i class="ti ti-trash"></i> 确定删除</button>
     </div>
   </div>
 </div>
@@ -1027,6 +1052,24 @@ a { color: var(--txac); text-decoration: none; }
       <button class="btn" data-act="__h156" data-evt="click" data-act-args="[]">不再提醒</button>
       <button class="btn" data-act="__h157" data-evt="click" data-act-args="[]">下次再提醒</button>
       <button class="btn primary" data-act="__h155" data-evt="click" data-act-args="[]">打开缩略图</button>
+    </div>
+  </div>
+</div>
+<!-- 🆕 v1.6.0：加载吃力提醒——全部加载花太久或内存告急时，建议打开节省内存或缩略图 -->
+<div class="modal-overlay" id="memory-suggest-modal">
+  <div class="modal" style="width:420px;">
+    <div class="modal-header">
+      <i class="ti ti-info-circle" style="color:#e0693b;font-size:20px;margin-right:8px"></i>
+      <span class="modal-title">加载有点吃力</span>
+      <div class="modal-close" data-act="__h163" data-evt="click" data-act-args="[]"><i class="ti ti-x"></i></div>
+    </div>
+    <div class="modal-body">
+      <div style="font-size:12px;color:var(--tx2);line-height:1.7;">这次全部加载花的时间比较长，内存也吃得比较多。可以打开“节省内存”（只在需要时加载图片），或者把图片质量改成缩略图，之后打开会快很多。</div>
+    </div>
+    <div class="modal-footer" style="gap:8px;">
+      <button class="btn" data-act="__h162" data-evt="click" data-act-args="[]">不再提醒</button>
+      <button class="btn" id="mem-suggest-thumb-btn" data-act="__h161" data-evt="click" data-act-args="[]">打开缩略图</button>
+      <button class="btn primary" data-act="__h160" data-evt="click" data-act-args="[]">打开节省内存</button>
     </div>
   </div>
 </div>
@@ -1084,7 +1127,7 @@ a { color: var(--txac); text-decoration: none; }
         </div>
       </div>
       <div style="padding:12px;border:1px dashed var(--bd);border-radius:var(--radius-sm);font-size:11px;color:var(--txm);line-height:1.7;background:var(--s0);">
-        💡 <strong>温馨提示：</strong>导入前建议先执行一次「报表导出 → 备份全量 JSON」做留底，防止意外数据丢失。批量导入时系统会自动跳过已存在 ID 的记录，安全无副作用。
+        💡 <strong>温馨提示：</strong>导入前建议先执行一次「数据导出 → 备份全量 JSON」做留底，防止意外数据丢失。批量导入时系统会自动跳过已存在 ID 的记录，安全无副作用。
       </div>
     </div>
   </div>
@@ -1105,7 +1148,7 @@ a { color: var(--txac); text-decoration: none; }
   <div class="ctx-divider"></div>
   <div class="ctx-item" data-act="h_exportWholeItem" data-evt="click" data-act-args="[]"><i class="ti ti-package"></i> 导出整个素材</div>
   <div class="ctx-divider"></div>
-  <div class="ctx-item danger" data-act="__h86" data-evt="click" data-act-args="[]"><i class="ti ti-trash"></i> 移入防丢回收站</div>
+  <div class="ctx-item danger" data-act="__h86" data-evt="click" data-act-args="[]"><i class="ti ti-trash"></i> 移至回收站</div>
 </div>
 <!-- 主页卡片缩略图右键（3 项图片操作） -->
 <div class="ctx-menu" id="ctx-card-img">
@@ -1144,7 +1187,7 @@ a { color: var(--txac); text-decoration: none; }
       <div style="display:flex;align-items:center;justify-content:center;gap:20px;margin-bottom:22px;padding:16px;background:var(--s0);border-radius:var(--radius-sm);border:0.5px solid var(--bd);">
         <div style="text-align:center;">
           <div style="font-size:10px;color:var(--txm);letter-spacing:.05em;text-transform:uppercase;margin-bottom:6px;">当前版本</div>
-          <div style="font-size:22px;font-weight:700;color:var(--tx2);font-variant-numeric:tabular-nums;" id="update-cur-ver">1.1</div>
+          <div style="font-size:22px;font-weight:700;color:var(--tx2);font-variant-numeric:tabular-nums;" id="update-cur-ver">1.6.0</div>
         </div>
         <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
           <i class="ti ti-arrow-narrow-right" style="font-size:22px;color:var(--txm)"></i>
@@ -1174,6 +1217,114 @@ a { color: var(--txac); text-decoration: none; }
       <button class="btn primary" id="update-download-btn" style="gap:6px;padding:0 18px;">
         <i class="ti ti-download"></i> 立即下载新版本
       </button>
+    </div>
+  </div>
+</div>
+
+<!-- 🆕 v1.6.0：更新日志弹窗——设置 → 关于 → 查看更新日志，单独弹窗叠在设置上面，关了回到设置 -->
+<div class="modal-overlay" id="changelog-modal">
+  <div class="modal" style="max-width:480px;">
+    <div class="modal-header">
+      <i class="ti ti-file-description" style="color:var(--ac);font-size:20px;margin-right:8px"></i>
+      <span class="modal-title">更新日志</span>
+      <div class="modal-close" data-act="__h159" data-evt="click" data-act-args="[]"><i class="ti ti-x"></i></div>
+    </div>
+    <div class="modal-body" style="padding:20px 24px;">
+      <div style="margin-bottom:18px;">
+        <div style="font-size:14px;font-weight:700;color:var(--tx);margin-bottom:6px;">v1.6.0（2026-11-27）</div>
+        <div style="font-size:12px;font-weight:600;color:var(--tx2);margin:8px 0 2px;">新增</div>
+        <ul style="margin:0;padding-left:18px;font-size:12px;color:var(--tx2);line-height:1.8;">
+          <li>图片加载：图片质量可以选原图或 1.0～0.5 的缩略图；设置左侧导航里的“图片过滤”改成“图片加载”。</li>
+          <li>新加“节省内存”开关：打开后详情只加载封面、打开画廊才加载剩下的图片；加载吃力或内存告急时会提醒打开。</li>
+        </ul>
+        <div style="font-size:12px;font-weight:600;color:var(--tx2);margin:8px 0 2px;">优化</div>
+        <ul style="margin:0;padding-left:18px;font-size:12px;color:var(--tx2);line-height:1.8;">
+          <li>批量操作条更显眼：浅色主题用浅蓝底，深色主题用炭黑底，合并按钮按主题加了颜色。</li>
+          <li>画廊窗口四个角稍微倒了圆角。</li>
+          <li>画廊里也能空白处拖框选小图了，和主界面一样。</li>
+          <li>画廊看大图更好用了：滚轮按鼠标指的位置放大，放大后按住拖动看局部，拖动不再出小图和红叉，键盘左右键能切换上一张／下一张。</li>
+          <li>画廊空白处框选：现在放图区域任何空白处都能起框，不只限于有图的那几行。</li>
+          <li>画廊框选：选中的图现在边框、光环和打钩都更显眼，一眼就能看出框住了哪几张。</li>
+        </ul>
+        <div style="font-size:12px;font-weight:600;color:var(--tx2);margin:8px 0 2px;">修复</div>
+        <ul style="margin:0;padding-left:18px;font-size:12px;color:var(--tx2);line-height:1.8;">
+          <li>搜索框最近 3 条记录：点搜索框就弹出最近搜过的 3 条，点一条直接搜。</li>
+          <li>修了 3 处别人做的备份文件可能带脚本的问题：素材标题、思维导图标题和封面图现在都会转义，不会再执行。</li>
+          <li>个别图在画廊里显示不出来、放大又能看：坏掉的磁盘缩略图会自动重新生成；图片特别多的夹子打开时也不会再丢图。</li>
+        </ul>
+      </div>
+      <div style="margin-bottom:18px;">
+        <div style="font-size:14px;font-weight:700;color:var(--tx);margin-bottom:6px;">v1.5.0（2026-11-26）</div>
+        <div style="font-size:12px;font-weight:600;color:var(--tx2);margin:8px 0 2px;">新增</div>
+        <ul style="margin:0;padding-left:18px;font-size:12px;color:var(--tx2);line-height:1.8;">
+          <li>批量操作：按住 Ctrl 点多张，或者在空白处拖框圈选，选好后可以批量删除，或者合并成一项。</li>
+          <li>设置改成左侧导航：外观主题、图片过滤、回收站、数据与备份、关于，点左边换右边。</li>
+          <li>搜索框输入后点一下小叉就清空；标签输入有建议，搜到的词会高亮。</li>
+          <li>缩略图：资源超过 1GB 时建议打开，打开后卡片和九宫格用压缩小图，滚动更快，放大和导出还是原图。</li>
+          <li>数据备份与恢复：导出 JSON 备份，需要时导入恢复。</li>
+        </ul>
+        <div style="font-size:12px;font-weight:600;color:var(--tx2);margin:8px 0 2px;">优化</div>
+        <ul style="margin:0;padding-left:18px;font-size:12px;color:var(--tx2);line-height:1.8;">
+          <li>九宫格全选后拖一张图不会再取消勾选，拖的是整组选中的图。</li>
+          <li>批量操作条固定在主界面最下方居中，滚动不动；窄窗口自动换行，按钮都能点到。</li>
+          <li>点卡片只看详情不选中，Ctrl 点多张或拖框圈选才进多选。</li>
+          <li>更新检查只提示正式版，不想要的版本可以暂时忽略。</li>
+          <li>设置窗口：深色模式下副标题更清楚；设置里再弹新窗口会叠在上面，关了回到设置。</li>
+        </ul>
+        <div style="font-size:12px;font-weight:600;color:var(--tx2);margin:8px 0 2px;">修复</div>
+        <ul style="margin:0;padding-left:18px;font-size:12px;color:var(--tx2);line-height:1.8;">
+          <li>上传图片后删掉原文件，素材里图片会空白：现在传完立刻拷进插件目录，删原文件也不影响。</li>
+          <li>详情面板的九宫格预览以前只有封面图，现在全部图都能出来。</li>
+          <li>批量删除、合并这些确认框以前是浏览器自带的，现在换成插件自己的弹窗。</li>
+        </ul>
+      </div>
+      <div style="margin-bottom:18px;">
+        <div style="font-size:14px;font-weight:700;color:var(--tx);margin-bottom:6px;">v1.4.0（2026-11-02）</div>
+        <div style="font-size:12px;font-weight:600;color:var(--tx2);margin:8px 0 2px;">优化</div>
+        <ul style="margin:0;padding-left:18px;font-size:12px;color:var(--tx2);line-height:1.8;">
+          <li>优化加载速度与使用体验。</li>
+        </ul>
+        <div style="font-size:12px;font-weight:600;color:var(--tx2);margin:8px 0 2px;">修复</div>
+        <ul style="margin:0;padding-left:18px;font-size:12px;color:var(--tx2);line-height:1.8;">
+          <li>修复已知问题。</li>
+        </ul>
+      </div>
+      <div style="margin-bottom:18px;">
+        <div style="font-size:14px;font-weight:700;color:var(--tx);margin-bottom:6px;">v1.3.0（2026-07-18）</div>
+        <div style="font-size:12px;font-weight:600;color:var(--tx2);margin:8px 0 2px;">优化</div>
+        <ul style="margin:0;padding-left:18px;font-size:12px;color:var(--tx2);line-height:1.8;">
+          <li>优化加载速度与使用体验。</li>
+        </ul>
+        <div style="font-size:12px;font-weight:600;color:var(--tx2);margin:8px 0 2px;">修复</div>
+        <ul style="margin:0;padding-left:18px;font-size:12px;color:var(--tx2);line-height:1.8;">
+          <li>修复已知问题。</li>
+        </ul>
+      </div>
+      <div style="margin-bottom:18px;">
+        <div style="font-size:14px;font-weight:700;color:var(--tx);margin-bottom:6px;">v1.2.0（2026-07-15）</div>
+        <div style="font-size:12px;font-weight:600;color:var(--tx2);margin:8px 0 2px;">新增</div>
+        <ul style="margin:0;padding-left:18px;font-size:12px;color:var(--tx2);line-height:1.8;">
+          <li>浏览器扩展形态：点工具栏图标打开，不用再手动拖 HTML 文件。</li>
+          <li>素材分类管理，卡片式瀑布流展示。</li>
+          <li>图集全览：双击素材卡片或点侧边导航，均可进大图浏览。</li>
+          <li>九宫格排版预览，一键查看多图排版效果。</li>
+          <li>多平台链接归档：Facebook、YouTube 等平台链接收录与解析。</li>
+          <li>图片直接归档到本地文件夹，不依赖云端。</li>
+          <li>目录记忆授权：自动记住上次连接的文件夹，下次只需确认授权。</li>
+          <li>防丢回收站：删除有后悔药，支持永久清除。</li>
+          <li>时光机快照：自动定期备份元数据，可回溯历史状态。</li>
+          <li>数据分析洞察：平台分布、分类热力、收录趋势一览。</li>
+          <li>深色／亮色主题，跟随系统或手动切换。</li>
+          <li>PIN 码访问锁，可选密码保护。</li>
+          <li>自动更新检测：启动时静默检测新版本。</li>
+        </ul>
+      </div>
+      <div style="margin-bottom:18px;">
+        <div style="font-size:14px;font-weight:700;color:var(--tx);margin-bottom:6px;">v1.0.0（2026-07-01）</div>
+        <ul style="margin:0;padding-left:18px;font-size:12px;color:var(--tx2);line-height:1.8;">
+          <li>初次发布。</li>
+        </ul>
+      </div>
     </div>
   </div>
 </div>

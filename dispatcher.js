@@ -7,7 +7,7 @@
 (function () {
   var BUBBLING_EVENTS = ['click', 'dblclick', 'contextmenu', 'mousedown', 'change',
                           'drop', 'dragstart', 'dragover', 'dragend', 'keydown'];
-  var CAPTURE_ONLY_EVENTS = ['input', 'error', 'blur']; // 这些事件不冒泡，需要用捕获阶段委托
+  var CAPTURE_ONLY_EVENTS = ['input', 'error', 'blur', 'focus']; // 这些事件不冒泡，需要用捕获阶段委托。focus 之前漏了，导致搜索框的 h_searchFocus 从没跑过，最近搜索记录点了也不弹（2026-11-27 真机反馈，修进 v1.6.0）
 
   // 部分元素需要同时绑定多个事件（如卡片同时需要 click / dblclick / contextmenu / drag*）。
   // 若都使用同名的 data-act / data-evt 属性，HTML 解析器只会保留第一次出现的属性值，

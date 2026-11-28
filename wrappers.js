@@ -57,8 +57,8 @@ function __h62(event, ) { saveCatModal() }
 function __h63(event, ) { closeSettings() }
 function __h64(event, ) { updateSetting('theme', this.value); setTheme(this.value); }
 function __h68(event, ) { chooseFolder() }
-function __h69(event, ) { closeSettings();openImport() }
-function __h70(event, ) { closeSettings();openExport() }
+function __h69(event, ) { openImport() } // 2026-11-27：导入弹窗叠在设置上面，不再先关设置
+function __h70(event, ) { openExport() } // 2026-11-27：导出弹窗叠在设置上面，不再先关设置
 function __h71(event, ) { closeSettings() }
 function __h72(event, ) { document.getElementById('export-modal').classList.remove('show') }
 function __h73(event, ) { exportJSON() }
@@ -127,8 +127,8 @@ function __h137(event, ) { clearLibBatchSelection() } // 🆕 v1.4：批量操�
 function __h140(event, ) { toggleTrashAutoClean() } // 🆕 v1.4：回收站自动清理总开关
 function __h141(event, ) { setTrashCleanDays(this.value) } // 🆕 v1.4：回收站自动清理——保留天数
 function __h142(event, ) { setTrashCleanSize(this.value) } // 🆕 v1.4：回收站自动清理——体积上限
-function __h143(event, ) { toggleThumbEnabled() } // 🆕 v1.5：缩略图总开关
-function __h144(event, ) { setThumbQuality(this.value) } // 🆕 v1.5：缩略图质量
+function __h143(event, ) { toggleSaveMemory() } // 🆕 v1.6.0：节省内存开关
+function __h144(event, ) { setThumbQuality(this.value) } // 🆕 v1.6.0：图片质量下拉框（原图 / 1.0 / 0.9 / 0.8 / 0.7 / 0.5）
 function __h145(event, ) { skipUpdateVersion() } // 🆕 v1.5-fix：更新弹窗“暂时忽略此版本”
 function __h146(event) { // 搜索框一键清空
   event.preventDefault();
@@ -149,6 +149,12 @@ function __h154(event, ) { cancelBatchDeleteModal() } // 🆕 2026-11-26：批�
 function __h155(event, ) { enableThumbsFromSuggest() } // 🆕 2026-11-26：超 1GB 弹窗——打开缩略图
 function __h156(event, ) { dismissThumbSuggest() } // 🆕 2026-11-26：超 1GB 弹窗——不再提醒（以后不再问）
 function __h157(event, ) { remindThumbSuggestLater() } // 🆕 2026-11-26：超 1GB 弹窗——下次再提醒（只关这次）
+function __h158(event, ) { openChangelogModal() } // 🆕 v1.6.0：设置关于页——查看更新日志
+function __h159(event, ) { closeChangelogModal() } // 🆕 v1.6.0：更新日志弹窗——关闭
+function __h160(event, ) { enableMemorySaverFromSuggest() } // 🆕 v1.6.0：加载吃力提醒——打开节省内存
+function __h161(event, ) { enableThumbsFromMemorySuggest() } // 🆕 v1.6.0：加载吃力提醒——打开缩略图
+function __h162(event, ) { dismissMemorySuggest() } // 🆕 v1.6.0：加载吃力提醒——不再提醒
+function __h163(event, ) { remindMemorySuggestLater() } // 🆕 v1.6.0：加载吃力提醒——叉叉，只关这次
 
 window.__Handlers = {
   __h2: __h2,
@@ -293,6 +299,12 @@ window.__Handlers = {
   __h155: __h155,
   __h156: __h156,
   __h157: __h157,
+  __h158: __h158,
+  __h159: __h159,
+  __h160: __h160,
+  __h161: __h161,
+  __h162: __h162,
+  __h163: __h163,
 
   h_exportWholeItem: function (event) { const it = DB.items.find(i => i.id === ctxCardId); if (it) exportWholeItem(it); }, // 🆕 v1.3：主页卡片右键"打包导出整个素材"
   h_searchInput: function (event) { if (typeof scheduleLibrarySearchRender === 'function') scheduleLibrarySearchRender(); if (typeof updateSearchClearBtn === 'function') updateSearchClearBtn(); }, // 🆕 v1.5-fix：搜索防抖 180ms，不再每按一键就全量重渲染（见 A-05）

@@ -13,7 +13,7 @@ let DB = {
 /* ═══════════════════════════════════════════════════════
    APP CONFIG (版本与远程更新配置)
 ═══════════════════════════════════════════════════════ */
-const APP_VERSION = '1.5';
+const APP_VERSION = '1.6.0';
 // ⬇ 填入你的 GitHub 用户名/仓库名，例如 'buku-lhy/cailiao-ku'
 const GITHUB_REPO = 'bstbuku-ship-it/Reference-Material-Library';
 
@@ -25,10 +25,18 @@ let WS = {
 
 let dirHandle = null;
 window.blobCache = {}; // 内存 URL 对象缓存池，彻底避免 Base64 代码导致大屏卡顿
+window.stripBlobCache = {}; // 详情预览条专用缓存：永远 0.85 压缩小图，不跟图片质量下拉框
 
 // 🆕 v1.5-fix：缓存上限与淘汰。两个缓存各最多保留 300 个 URL，超限时释放最久未用、
 // 且当前没有任何 <img> 正在显示的 URL（避免正在看的图被误释放）。
 const MAX_BLOB_CACHE = 300;
+// 🆕 v1.6.0：批量加载保护——打开画廊／详情时一次性加载一批图，加载完重渲染才显示；
+// 加载过程中淘汰会把这批刚加载的图又释放掉（它们的格子还是占位图，不受“正在显示”保护）。
+// 加载期间先护住这批图的 id，加载完（重渲染后正在显示的图自有保护）再放开。Map 计引用数，
+// 画廊和详情同时在加载同一批图也不会互相提前放开。
+const _protectedBlobIds = new Map(); // id -> 引用数
+function _protectBlobIds(ids) { ids.forEach(id => _protectedBlobIds.set(id, (_protectedBlobIds.get(id) || 0) + 1)); }
+function _unprotectBlobIds(ids) { ids.forEach(id => { const n = (_protectedBlobIds.get(id) || 0) - 1; if (n <= 0) _protectedBlobIds.delete(id); else _protectedBlobIds.set(id, n); }); }
 function _collectInUseBlobUrls() {
   try {
     const set = new Set();
@@ -43,6 +51,7 @@ function _evictCacheIfNeeded(cache) {
   let over = keys.length - MAX_BLOB_CACHE;
   for (const k of keys) {
     if (over <= 0) break;
+    if (_protectedBlobIds.has(k)) continue; // 正在批量加载、马上要显示的图，不淘汰
     const url = cache[k];
     if (inUse.has(url)) continue;
     try { URL.revokeObjectURL(url); } catch (e) {}
@@ -70,6 +79,7 @@ function revokeShotBlob(id) {
   const url = window.blobCache[id];
   if (url) { try { URL.revokeObjectURL(url); } catch(e) {} delete window.blobCache[id]; }
   revokeOrigBlob(id); // 🆕 v1.5：原图缓存也要一并释放，避免内存泄漏
+  if (window.stripBlobCache && window.stripBlobCache[id]) { try { URL.revokeObjectURL(window.stripBlobCache[id]); } catch(e) {} delete window.stripBlobCache[id]; } // 🆕 v1.6.0：详情预览条缓存也一并释放
 }
 function revokeItemBlobs(item) {
   if (!item || !item.shots) return;
@@ -277,6 +287,7 @@ async function setupWorkspace() {
   await loadFromFolder();
   computeAndRenderDiskUsage(); // 🆕 v1.3：连接成功后异步统计一次本地占用空间，不阻塞主流程
   runTrashAutoCleanIfNeeded(); // 🆕 v1.4：按用户在设置里配置的保留天数/体积上限，静默清理过期回收站内容（默认关闭，不影响没开启的人）
+  maybeEagerLoadAllImages(); // 🆕 v1.6.0：节省内存关着时，打开插件就把库里所有图片全部加载好；开着时不跑
 }
 
 // 🆕 v1.3：递归统计已连接文件夹的总占用空间，GB/MB 自动切换单位（不满 1GB 显示 MB）
@@ -332,7 +343,7 @@ async function computeAndRenderDiskUsage(force = false) {
 const THUMB_SUGGEST_BYTES = 1024 ** 3;
 function maybeSuggestThumbs(totalBytes) {
   ensureDefaults();
-  if (DB.settings.thumbEnabled) return false;
+  if (DB.settings.thumbQuality !== 'orig') return false; // 已经在用缩略图就不用再建议
   if (DB.settings.thumbSuggestDismissed) return false;
   if (!(totalBytes > THUMB_SUGGEST_BYTES)) return false;
   const m = document.getElementById('thumb-suggest-modal');
@@ -342,10 +353,9 @@ function maybeSuggestThumbs(totalBytes) {
 }
 function enableThumbsFromSuggest() {
   ensureDefaults();
-  DB.settings.thumbEnabled = true;
-  const el = document.getElementById('set-thumb-enabled');
-  if (el) el.className = 'switch on';
-  updateThumbQualityRowUI();
+  DB.settings.thumbQuality = 1; // 从“原图”切到 1.0 缩略图
+  const q = document.getElementById('set-thumb-quality');
+  if (q) q.value = '1';
   clearDisplayBlobCacheOnly();
   refreshVisibleImagesAfterThumbSettingChange();
   scheduleSave();
@@ -363,6 +373,87 @@ function dismissThumbSuggest() {
 // 🆕 2026-11-26：下次再提醒——只关这次弹窗，什么都不记；下次打开插件、第一次算占用时超 1GB 还会再弹
 function remindThumbSuggestLater() {
   const m = document.getElementById('thumb-suggest-modal');
+  if (m) m.classList.remove('show');
+}
+
+// 🆕 v1.6.0：节省内存——默认关闭。关着时，打开插件就把库里所有图片全部加载好（包括还没翻到的卡片），
+// 随时备用；是原图还是缩略图，看图片质量下拉框选了什么。开着时不预加载：主页封面照常滚动加载，
+// 点卡片进详情只加载封面，打开画廊才加载剩下的图片。后台分批跑，不堵界面；切设置会立刻停掉这一轮。
+let _eagerLoadToken = 0;
+let _memSuggestShownThisSession = false;
+async function maybeEagerLoadAllImages() {
+  ensureDefaults();
+  if (DB.settings.saveMemory) return;
+  if (!dirHandle) return;
+  const token = ++_eagerLoadToken;
+  const t0 = Date.now();
+  const jobs = [];
+  (DB.items || []).forEach(it => (it.shots || []).forEach(s => { if (s && s.type !== 'reel') jobs.push([it, s]); }));
+  if (!jobs.length) return;
+  let next = 0;
+  const workers = [];
+  for (let w = 0; w < Math.min(SHOT_LOAD_CONCURRENCY, jobs.length); w++) {
+    workers.push((async () => {
+      while (next < jobs.length) {
+        if (token !== _eagerLoadToken) return;
+        const [it, s] = jobs[next++];
+        try { await ensureDisplayBlob(it, s, 'nine'); } catch (e) {}
+      }
+    })());
+  }
+  await Promise.all(workers);
+  if (token !== _eagerLoadToken) return;
+  maybeSuggestMemorySaver(Date.now() - t0, jobs.length);
+}
+// 🆕 v1.6.0：加载吃力提醒——全量预加载花太久，或内存占用已经很高时，提醒用户打开节省内存或缩略图。
+// 只在还有省内存手段没开时弹；一会话只弹一次；点过“不再提醒”就不再弹。
+function maybeSuggestMemorySaver(elapsedMs, totalShots) {
+  ensureDefaults();
+  if (_memSuggestShownThisSession || DB.settings.memSuggestDismissed) return false;
+  if (DB.settings.saveMemory) return false;
+  let heapRatio = 0;
+  try { if (window.performance && performance.memory) heapRatio = performance.memory.usedJSHeapSize / performance.memory.jsHeapSizeLimit; } catch (e) {}
+  if (!(elapsedMs > 30000 || heapRatio > 0.85)) return false;
+  _memSuggestShownThisSession = true;
+  const m = document.getElementById('memory-suggest-modal');
+  if (!m || m.classList.contains('show')) return false;
+  const thumbBtn = document.getElementById('mem-suggest-thumb-btn');
+  if (thumbBtn) thumbBtn.style.display = (DB.settings.thumbQuality === 'orig') ? '' : 'none'; // 已经在用缩略图就只留“打开节省内存”
+  m.classList.add('show');
+  return true;
+}
+function enableMemorySaverFromSuggest() {
+  ensureDefaults();
+  DB.settings.saveMemory = true;
+  const el = document.getElementById('set-memory-enabled');
+  if (el) el.className = 'switch on';
+  _eagerLoadToken++; // 停掉正在跑的全量预加载
+  scheduleSave();
+  const m = document.getElementById('memory-suggest-modal');
+  if (m) m.classList.remove('show');
+  showToast('✅ 节省内存已开启', 'success');
+}
+function enableThumbsFromMemorySuggest() {
+  ensureDefaults();
+  DB.settings.thumbQuality = 1;
+  const q = document.getElementById('set-thumb-quality');
+  if (q) q.value = '1';
+  clearDisplayBlobCacheOnly();
+  refreshVisibleImagesAfterThumbSettingChange();
+  scheduleSave();
+  const m = document.getElementById('memory-suggest-modal');
+  if (m) m.classList.remove('show');
+  showToast('✅ 缩略图已开启', 'success');
+}
+function dismissMemorySuggest() {
+  ensureDefaults();
+  DB.settings.memSuggestDismissed = true;
+  scheduleSave();
+  const m = document.getElementById('memory-suggest-modal');
+  if (m) m.classList.remove('show');
+}
+function remindMemorySuggestLater() {
+  const m = document.getElementById('memory-suggest-modal');
   if (m) m.classList.remove('show');
 }
 
@@ -566,6 +657,19 @@ async function makeThumbBlob(srcFile, width, quality) {
   }
 }
 
+// 🆕 v1.6.0：磁盘缩略图可能是写了一半的坏文件（插件中途关掉／写入被打断）：只看文件在不在就
+// 直接用，格子就会显示一张解不出来的坏图（放大读原图又能看）。所有缩略图都是 canvas.toBlob
+// 生成的 JPEG，一定以 FF D8 开头、以 FF D9 结尾；对不上就当坏文件删掉、重新生成。
+async function isValidJpegFile(file) {
+  try {
+    if (!file || file.size < 100) return false;
+    const head = new Uint8Array(await file.slice(0, 2).arrayBuffer());
+    if (head[0] !== 0xFF || head[1] !== 0xD8) return false;
+    const tail = new Uint8Array(await file.slice(file.size - 2).arrayBuffer());
+    return tail[0] === 0xFF && tail[1] === 0xD9;
+  } catch (e) { return false; }
+}
+
 // 生成/读取展示用图片（受"缩略图"设置控制），用于卡片网格、九宫格、封面预览等所有"浏览"场景
 async function ensureDisplayBlob(item, shot, kind) {
   if (!shot || shot.type === 'reel') return null;
@@ -578,14 +682,16 @@ async function ensureDisplayBlob(item, shot, kind) {
   if (!srcFh) return null;
   const srcFile = await srcFh.getFile();
 
-  if (!DB.settings.thumbEnabled) {
-    // 🆕 v1.5-fix：缩略图关闭时，展示缓存与原图缓存各持一份独立的 Object URL，
+  // 🆕 v1.6.0：图片质量下拉框——选“原图”直接显示原图（卡片、画廊都一样）；选数字用压缩小图。
+  // 详情预览条不走这里（ensureStripBlob，永远 0.85 压缩小图，不跟下拉框）。
+  if (DB.settings.thumbQuality === 'orig') {
+    // 🆕 v1.5-fix：原图时展示缓存与原图缓存各持一份独立的 Object URL，
     // 绝不共用同一个 URL（此前共用导致切设置后原图缓存指向已释放 URL，见 A-01）。
     setOrigShotBlob(shot.id, srcFile);
     return setDisplayShotBlob(shot.id, srcFile);
   }
 
-  const quality = DB.settings.thumbQuality || 1;
+  const quality = (typeof DB.settings.thumbQuality === 'number' ? DB.settings.thumbQuality : 1);
   const width = kind === 'nine' ? THUMB_NINE_WIDTH : THUMB_CARD_WIDTH;
   // 🆕 v1.5-fix：缓存名带上源文件的大小与修改时间，源文件在磁盘上被替换后旧缩略图不再被误用（见 A-07）。
   const fingerprint = `${srcFile.size}_${srcFile.lastModified || 0}`;
@@ -596,7 +702,10 @@ async function ensureDisplayBlob(item, shot, kind) {
   if (thumbDir) {
     try {
       const cachedFh = await thumbDir.getFileHandle(cacheName, { create: false });
-      return setShotBlob(shot.id, await cachedFh.getFile());
+      const cachedFile = await cachedFh.getFile();
+      if (await isValidJpegFile(cachedFile)) return setShotBlob(shot.id, cachedFile);
+      // 缓存文件坏了（写了一半／坏数据）：删掉，往下走重新生成，不让格子一直显示坏图
+      try { await thumbDir.removeEntry(cacheName); } catch (e) {}
     } catch (e) { /* 还没生成过，往下走生成流程 */ }
   }
 
@@ -634,13 +743,13 @@ async function ensureDisplayBlobTrash(trashEntry, shot) {
   if (!fh) return null;
   const srcFile = await fh.getFile();
 
-  if (!DB.settings.thumbEnabled) {
+  if (DB.settings.thumbQuality === 'orig') {
     // 与主库一致：展示缓存与原图缓存各持一份独立 URL，绝不共用（见 A-01）。
     setOrigShotBlob(shot.id, srcFile);
     return setDisplayShotBlob(shot.id, srcFile);
   }
 
-  const quality = DB.settings.thumbQuality || 1;
+  const quality = (typeof DB.settings.thumbQuality === 'number' ? DB.settings.thumbQuality : 1);
   const width = THUMB_CARD_WIDTH;
   const fingerprint = `${srcFile.size}_${srcFile.lastModified || 0}`;
   const cacheName = `${shot.id}_card_q${Math.round(quality * 100)}_${fingerprint}.jpg`;
@@ -652,7 +761,10 @@ async function ensureDisplayBlobTrash(trashEntry, shot) {
   if (thumbDir) {
     try {
       const cachedFh = await thumbDir.getFileHandle(cacheName, { create: false });
-      return setShotBlob(shot.id, await cachedFh.getFile());
+      const cachedFile = await cachedFh.getFile();
+      if (await isValidJpegFile(cachedFile)) return setShotBlob(shot.id, cachedFile);
+      // 缓存文件坏了（写了一半／坏数据）：删掉，往下走重新生成，不让回收站封面一直显示坏图
+      try { await thumbDir.removeEntry(cacheName); } catch (e) {}
     } catch (e) { /* 还没生成过，往下走生成流程 */ }
   }
 
@@ -690,17 +802,101 @@ const SHOT_LOAD_CONCURRENCY = 4; // 🆕 v1.5-fix：九宫格打开时最多 4 �
 async function ensureItemDisplayBlobsLoaded(item, kind) {
   if (!item || !item.shots) return;
   const shots = item.shots.filter(s => s.type !== 'reel');
-  let next = 0;
-  const workers = [];
-  for (let w = 0; w < Math.min(SHOT_LOAD_CONCURRENCY, shots.length); w++) {
-    workers.push((async () => {
-      while (next < shots.length) {
-        const s = shots[next++];
-        try { await ensureDisplayBlob(item, s, kind); } catch (e) {}
-      }
-    })());
+  // 加载期间护住这批图，不让缓存淘汰把刚加载好的前面几张又释放掉（见 _protectedBlobIds）
+  const ids = shots.map(s => s.id);
+  _protectBlobIds(ids);
+  try {
+    let next = 0;
+    const workers = [];
+    for (let w = 0; w < Math.min(SHOT_LOAD_CONCURRENCY, shots.length); w++) {
+      workers.push((async () => {
+        while (next < shots.length) {
+          const s = shots[next++];
+          try { await ensureDisplayBlob(item, s, kind); } catch (e) {}
+        }
+      })());
+    }
+    await Promise.all(workers);
+  } finally {
+    _unprotectBlobIds(ids);
   }
-  await Promise.all(workers);
+}
+
+// 🆕 v1.6.0：详情预览条（shots-grid）专用加载——永远 0.85 压缩小图，不跟图片质量下拉框，
+// 也不跟节省内存开关；不管用户怎么选都一次性全部加载好。那个位置显示的图片本身就很小，
+// 不需要原图；用户点开缩略图才是原图（大图查看走原图）。
+// 用独立的 stripBlobCache，不进 blobCache，否则 0.85 会抢占画廊／卡片按下拉框加载的图。
+function revokeStripBlob(id) {
+  if (!id || !window.stripBlobCache) return;
+  const url = window.stripBlobCache[id];
+  if (url) { try { URL.revokeObjectURL(url); } catch (e) {} delete window.stripBlobCache[id]; }
+}
+function setStripShotBlob(id, fileOrBlob) {
+  revokeStripBlob(id);
+  window.stripBlobCache[id] = URL.createObjectURL(fileOrBlob);
+  _evictCacheIfNeeded(window.stripBlobCache);
+  return window.stripBlobCache[id];
+}
+async function ensureStripBlob(item, shot) {
+  if (!shot || shot.type === 'reel') return null;
+  if (window.stripBlobCache[shot.id]) return window.stripBlobCache[shot.id];
+  ensureDefaults();
+  if (!dirHandle || !item) return null;
+  const dir = await getItemDirHandleSafe(item);
+  if (!dir) return null;
+  const srcFh = await getShotFileHandle(dir, shot);
+  if (!srcFh) return null;
+  const srcFile = await srcFh.getFile();
+  const cacheName = `${shot.id}_strip_q85_${srcFile.size}_${srcFile.lastModified || 0}.jpg`;
+  const thumbDir = await getDirHandleByPath(dirHandle, `${getItemFolderPath(item)}/.thumbs`, true);
+  if (thumbDir) {
+    try {
+      const cachedFh = await thumbDir.getFileHandle(cacheName, { create: false });
+      const cachedFile = await cachedFh.getFile();
+      if (await isValidJpegFile(cachedFile)) return setStripShotBlob(shot.id, cachedFile);
+      // 缓存文件坏了（写了一半／坏数据）：删掉，往下走重新生成，不让详情预览条一直显示坏图
+      try { await thumbDir.removeEntry(cacheName); } catch (e) {}
+    } catch (e) { /* 还没生成过，往下走生成流程 */ }
+  }
+  try {
+    const thumbBlob = await makeThumbBlob(srcFile, THUMB_NINE_WIDTH, 0.85);
+    if (!thumbBlob) return setStripShotBlob(shot.id, srcFile);
+    if (thumbDir) {
+      try {
+        const w2 = await (await thumbDir.getFileHandle(cacheName, { create: true })).createWritable(); await w2.write(thumbBlob); await w2.close();
+        try {
+          for await (const [n, h2] of thumbDir.entries()) {
+            if (h2.kind === 'file' && n.startsWith(`${shot.id}_strip_`) && n !== cacheName) await thumbDir.removeEntry(n).catch(() => {});
+          }
+        } catch (e) {}
+      } catch (e) { }
+    }
+    return setStripShotBlob(shot.id, thumbBlob);
+  } catch (e) {
+    return setStripShotBlob(shot.id, srcFile);
+  }
+}
+async function ensureItemStripBlobsLoaded(item) {
+  if (!item || !item.shots) return;
+  const shots = item.shots.filter(s => s.type !== 'reel');
+  // 加载期间护住这批图，不让缓存淘汰把刚加载好的前面几张又释放掉（见 _protectedBlobIds）
+  const ids = shots.map(s => s.id);
+  _protectBlobIds(ids);
+  try {
+    let next = 0;
+    const workers = [];
+    for (let w = 0; w < Math.min(SHOT_LOAD_CONCURRENCY, shots.length); w++) {
+      workers.push((async () => {
+        while (next < shots.length) {
+          const s = shots[next++];
+          try { await ensureStripBlob(item, s); } catch (e) {}
+        }
+      })());
+    }
+    await Promise.all(workers);
+  } finally {
+    _unprotectBlobIds(ids);
+  }
 }
 
 
@@ -833,8 +1029,11 @@ function ensureDefaults() {
   if (!DB.settings.sortMode) DB.settings.sortMode = 'default';
   if (!Array.isArray(DB.settings.searchHistory)) DB.settings.searchHistory = []; // 🆕 v1.3：搜索框最近记录（最多保留 3 条）
   if (!DB.settings.trashAutoClean) DB.settings.trashAutoClean = { enabled: false, days: 30, sizeMB: 0 }; // 🆕 v1.4：回收站自动清理，默认关闭
-  if (DB.settings.thumbEnabled === undefined) DB.settings.thumbEnabled = false; // 🆕 2026-11-26：缩略图默认关闭，存的资源超过 1GB 时弹窗建议打开
-  if (!DB.settings.thumbQuality) DB.settings.thumbQuality = 1; // 🆕 v1.5：默认质量 1.0（几乎不压缩，只缩小尺寸）
+  if (DB.settings.thumbEnabled === false) DB.settings.thumbQuality = 'orig'; // 以前开关关着（默认）→ 原图
+  if (DB.settings.thumbQuality === undefined) DB.settings.thumbQuality = (DB.settings.thumbEnabled === true) ? 1 : 'orig'; // 以前开着 → 1.0；全新安装 → 原图
+  if (DB.settings.thumbEnabled !== undefined) delete DB.settings.thumbEnabled; // 旧开关字段不再使用
+  if (DB.settings.saveMemory === undefined) DB.settings.saveMemory = false; // 🆕 v1.6.0：节省内存默认关闭，打开插件就把所有图片全部加载好
+  if (DB.settings.memSuggestDismissed === undefined) DB.settings.memSuggestDismissed = false; // 加载吃力提醒：点过“不再提醒”就不再弹
   if (DB.settings.skippedUpdateVersion === undefined) DB.settings.skippedUpdateVersion = ''; // 🆕 v1.5-fix：用户点“暂时忽略”的版本号，见 A-09
   const sortLbl = document.getElementById('sort-btn-label'); if (sortLbl) sortLbl.textContent = SORT_LABELS[DB.settings.sortMode] || '排序方式';
 }
@@ -892,28 +1091,25 @@ function refreshVisibleImagesAfterThumbSettingChange() {
   }
   renderDetailPanel();
 }
-function toggleThumbEnabled() {
+function toggleSaveMemory() {
   ensureDefaults();
-  DB.settings.thumbEnabled = !DB.settings.thumbEnabled;
-  const el = document.getElementById('set-thumb-enabled');
-  if (el) el.className = DB.settings.thumbEnabled ? 'switch on' : 'switch';
-  updateThumbQualityRowUI();
-  clearDisplayBlobCacheOnly();
-  refreshVisibleImagesAfterThumbSettingChange();
+  DB.settings.saveMemory = !DB.settings.saveMemory;
+  const el = document.getElementById('set-memory-enabled');
+  if (el) el.className = DB.settings.saveMemory ? 'switch on' : 'switch';
+  if (DB.settings.saveMemory) {
+    _eagerLoadToken++; // 打开省内存：正在跑的全量预加载立刻停
+  } else {
+    maybeEagerLoadAllImages(); // 关掉省内存：补一次全量预加载，全部图片一次加载好
+  }
   scheduleSave();
-  showToast(DB.settings.thumbEnabled ? '✅ 缩略图已开启' : '缩略图已关闭（改显示原图，占用和加载耗时会变大）', 'success');
+  showToast(DB.settings.saveMemory ? '✅ 节省内存已开启：详情只加载封面，打开画廊才加载剩下的图片' : '节省内存已关闭：打开插件就把所有图片全部加载好', 'success');
 }
 function setThumbQuality(v) {
   ensureDefaults();
-  DB.settings.thumbQuality = parseFloat(v) || 1;
+  DB.settings.thumbQuality = (v === 'orig') ? 'orig' : (parseFloat(v) || 1);
   clearDisplayBlobCacheOnly();
   refreshVisibleImagesAfterThumbSettingChange();
   scheduleSave();
-}
-function updateThumbQualityRowUI() {
-  const on = DB.settings.thumbEnabled;
-  const el = document.getElementById('thumb-quality-row');
-  if (el) { el.style.opacity = on ? '1' : '.45'; el.style.pointerEvents = on ? 'auto' : 'none'; }
 }
 
 // 🆕 v1.4：回收站自动清理设置
@@ -949,9 +1145,8 @@ function openSettings() {
   switchSettingsTab('theme');
   if (dirHandle && document.getElementById('set-folder-path')) document.getElementById('set-folder-path').textContent = dirHandle.name;
   
-  if (document.getElementById('set-thumb-enabled')) document.getElementById('set-thumb-enabled').className = DB.settings.thumbEnabled ? 'switch on' : 'switch';
-  if (document.getElementById('set-thumb-quality')) document.getElementById('set-thumb-quality').value = String(DB.settings.thumbQuality || 1);
-  updateThumbQualityRowUI();
+  if (document.getElementById('set-thumb-quality')) document.getElementById('set-thumb-quality').value = String(DB.settings.thumbQuality);
+  if (document.getElementById('set-memory-enabled')) document.getElementById('set-memory-enabled').className = DB.settings.saveMemory ? 'switch on' : 'switch';
   
   const tac = DB.settings.trashAutoClean || { enabled: false, days: 30, sizeMB: 0 };
   if (document.getElementById('set-trash-clean-enabled')) document.getElementById('set-trash-clean-enabled').className = tac.enabled ? 'switch on' : 'switch';
@@ -962,6 +1157,27 @@ function openSettings() {
   if(document.getElementById('settings-modal')) document.getElementById('settings-modal').classList.add('show');
 }
 function closeSettings() { if(document.getElementById('settings-modal')) document.getElementById('settings-modal').classList.remove('show'); }
+
+// 🆕 v1.6.0：设置 → 关于 → 更新日志——单独弹窗，叠在设置上面，关了回到设置（分层由 MutationObserver 自动处理）。
+function openChangelogModal() { const m = document.getElementById('changelog-modal'); if (m) m.classList.add('show'); }
+function closeChangelogModal() { const m = document.getElementById('changelog-modal'); if (m) m.classList.remove('show'); }
+
+// 2026-11-27：弹窗分层——后弹出的弹窗按打开顺序叠在上面（z-index 递增），下面的弹窗保留显示，
+// 只被上层更浅的遮罩盖住变灰；关掉上层后自动回到下层，不用重开设置。
+// 用 MutationObserver 跟住所有 .modal-overlay 的 show 变化，任何弹窗都自动分层，不用改各处调用。
+const __modalShowOrder = [];
+function __syncModalLayers() {
+  for (let i = __modalShowOrder.length - 1; i >= 0; i--) {
+    if (!__modalShowOrder[i].classList.contains('show')) __modalShowOrder.splice(i, 1);
+  }
+  document.querySelectorAll('.modal-overlay.show').forEach(el => { if (!__modalShowOrder.includes(el)) __modalShowOrder.push(el); });
+  __modalShowOrder.forEach((el, i) => { el.style.zIndex = String(1000 + i * 10); el.classList.toggle('modal-child', i > 0); });
+}
+if (typeof MutationObserver !== 'undefined') {
+  const __modalObserver = new MutationObserver(muts => { if (muts.some(m => m.attributeName === 'class')) __syncModalLayers(); });
+  document.querySelectorAll('.modal-overlay').forEach(el => __modalObserver.observe(el, { attributes: true, attributeFilter: ['class'] }));
+  __syncModalLayers();
+}
 
 // 🆕 2026-11-26：设置左侧导航——点导航换一页
 function switchSettingsTab(tab) {
@@ -989,7 +1205,7 @@ function getShotImgHtml(shot, styleStr="width:100%;height:100%;object-fit:cover;
     }
     return `<div style="position:relative;width:100%;height:100%;background:linear-gradient(135deg,var(--s3),var(--s1));"><div class="reel-preview-wrap"><i class="ti ti-player-play-filled" style="color:var(--tx)"></i></div></div>`;
   }
-  const src = window.blobCache[shot.id] || shot.dataUrl;
+  const src = window.blobCache[shot.id] || (window.stripBlobCache && window.stripBlobCache[shot.id]) || shot.dataUrl;
   // 安全审计 2026-11-26（S-01）：src 直接拼进 <img src="...">，导入的备份文件可借 dataUrl 里的引号跳出属性注入脚本。
   // 只放行本地 blob: 与 data:image:，其余一律不渲染；再转义一次做纵深防御。
   if (src) {
@@ -1147,7 +1363,8 @@ function renderLibraryGrid() {
       const reelOverlay = isVid && pinned.url.match(/youtu/) ? '' : (isVid ? `<div class="reel-preview-wrap"><i class="ti ti-player-play-filled"></i></div>` : '');
       
       // 🆕 v1.4：命中搜索关键字时，把标题/标签里匹配到的片段高亮出来，方便一眼定位
-      const displayTitle = q ? highlightMatch(it.title || '尚未命名', q) : (it.title || '尚未命名');
+      // 安全审计 2026-11-27（C-01）：没搜索词时标题原样拼进 innerHTML，导入备份里带 <img onerror> 的标题会直接执行；无搜索词也要转义。
+      const displayTitle = q ? highlightMatch(it.title || '尚未命名', q) : escapeHtml(it.title || '尚未命名');
 
       return `<div class="card${selectedId === it.id ? ' selected' : ''}${libSelectedIds.has(it.id) ? ' multi-selected' : ''}" draggable="true" data-id="${it.id}"
         data-act="__h103" data-evt="click" data-act-args="${JSON.stringify([it.id]).replace(/"/g, "&quot;")}" data-act2="__h104" data-evt2="dblclick" data-act-args2="${JSON.stringify([it.id]).replace(/"/g, "&quot;")}" data-act3="__h105" data-evt3="contextmenu" data-act-args3="${JSON.stringify([it.id]).replace(/"/g, "&quot;")}"
@@ -1166,6 +1383,7 @@ function renderLibraryGrid() {
   renderDetailPanel();
   updateLibBatchBar(); // 🆕 v1.4：每次重渲染都同步一下批量操作条的状态（数量/显隐）
   bindLibGridMarquee(); // 🆕 2026-11-26：空白处框选，只绑定一次
+  bindNineGridMarquee(); // 🆕 2026-11-27：画廊里也支持空白处框选，只绑定一次
 }
 
 // 🆕 v1.5：主页卡片封面图懒加载引擎。每次重渲染网格都会把 DOM 节点全部换掉，所以每次都要重新绑定观察器。
@@ -1402,6 +1620,63 @@ function bindLibGridMarquee() {
   });
 }
 
+// 🆕 2026-11-27：画廊（九宫格）里也支持空白处框选，和主界面一样。
+// 在九宫格空白处按下鼠标拖出一个框，框住的小图全部进选中，工具栏的选中数跟着变；
+// 空白处单击一下则取消已有的选中。只在九宫格模式下生效，思维导图模式没有小图、不框选；
+// 从小图上按下去的是拖图排序，不触发框选。
+let nineMarqueeBound = false;
+function bindNineGridMarquee() {
+  const container = document.getElementById('nine-container');
+  if (!container || nineMarqueeBound) return;
+  nineMarqueeBound = true;
+  container.addEventListener('mousedown', (e) => {
+    if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    if (nineViewMode === 'mindmap') return;
+    if (e.target.closest('.nine-item') || e.target.closest('button')) return;
+    if (!container.querySelector('.nine-item[data-nine-idx]')) return;
+    e.preventDefault(); // 防止拖动时选中页面文字
+    const startX = e.clientX, startY = e.clientY;
+    let rectEl = null, moved = false;
+    const onMove = (ev) => {
+      const dx = ev.clientX - startX, dy = ev.clientY - startY;
+      if (!moved && Math.abs(dx) < 5 && Math.abs(dy) < 5) return;
+      if (!moved) {
+        moved = true;
+        rectEl = document.createElement('div');
+        rectEl.id = 'lib-marquee';
+        rectEl.style.zIndex = '1100'; // 画廊弹窗遮罩是 1000，橡皮筋框必须盖在它上面才看得见
+        document.body.appendChild(rectEl);
+      }
+      const x = Math.min(startX, ev.clientX), y = Math.min(startY, ev.clientY);
+      const w = Math.abs(dx), h = Math.abs(dy);
+      rectEl.style.left = x + 'px'; rectEl.style.top = y + 'px';
+      rectEl.style.width = w + 'px'; rectEl.style.height = h + 'px';
+      const r = { left: x, top: y, right: x + w, bottom: y + h };
+      const hit = new Set();
+      container.querySelectorAll('.nine-item[data-nine-idx]').forEach(el => {
+        const b = el.getBoundingClientRect();
+        if (b.left < r.right && b.right > r.left && b.top < r.bottom && b.bottom > r.top) hit.add(parseInt(el.getAttribute('data-nine-idx'), 10));
+      });
+      nineGridSelectedIds = hit;
+      updateNineItemSelectionUI();
+      updateNineGridToolbar(); // 拖的时候工具栏的选中数跟着变
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      if (rectEl) rectEl.remove();
+      if (!moved) {
+        // 空白处单击：取消已有的选中
+        if (nineGridSelectedIds.size) { nineGridSelectedIds.clear(); updateNineItemSelectionUI(); updateNineGridToolbar(); }
+      } else {
+        updateNineGridToolbar();
+      }
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  });
+}
+
 function libCardDragStart(id, e) {
   if (!libSelectedIds.has(id)) { libSelectedIds.clear(); libSelectedIds.add(id); renderLibraryGrid(); }
   libDragIds = Array.from(libSelectedIds);
@@ -1447,21 +1722,46 @@ function clearLibBatchSelection() { libSelectedIds.clear(); renderLibraryGrid();
 
 // 🆕 2026-11-26：批量删除确认弹窗。主界面批量删除只是把选中项移入回收站（不是彻底删除），
 // 所以不用像回收站彻底删除那样输入「删除」两字确认，点一下确定删除就行。
+// 2026-11-27：通用确认弹窗——复用批量删除弹窗的样式，替代全部原生 confirm()。
+// 标题、正文、确认按钮文字与回调都由调用方传入；不传回调时走原来的批量删除逻辑。
+// 弹窗分层见 __syncModalLayers：从设置里打开时叠在设置上面，关掉后回到设置。
+let __pendingGenericConfirm = null;
+let __pendingGenericCancel = null;
+function openGenericConfirm(opts) {
+  opts = opts || {};
+  const titleEl = document.getElementById('generic-confirm-title');
+  const bodyEl = document.getElementById('batch-delete-text');
+  const btnEl = document.getElementById('generic-confirm-btn');
+  if (titleEl) titleEl.textContent = opts.title || '删除操作';
+  if (bodyEl) bodyEl.textContent = opts.body || '';
+  if (btnEl) {
+    btnEl.innerHTML = '<i class="ti ti-' + (opts.danger === false ? 'check' : 'trash') + '"></i> ' + escapeHtml(opts.confirmLabel || '确定删除');
+    btnEl.classList.toggle('danger', opts.danger !== false);
+  }
+  __pendingGenericConfirm = typeof opts.onConfirm === 'function' ? opts.onConfirm : null;
+  __pendingGenericCancel = typeof opts.onCancel === 'function' ? opts.onCancel : null;
+  const modal = document.getElementById('batch-delete-modal');
+  if (modal) modal.classList.add('show');
+}
 function openBatchDeleteModal() {
   const n = libSelectedIds.size;
   if (!n) return;
-  const textEl = document.getElementById('batch-delete-text');
-  if (textEl) textEl.textContent = `即将删除 ${n} 项内容，移至回收站。`;
-  const modal = document.getElementById('batch-delete-modal');
-  if (modal) modal.classList.add('show');
+  openGenericConfirm({ title: '删除操作', body: `即将删除 ${n} 项内容，移至回收站。`, confirmLabel: '确定删除', danger: true, onConfirm: () => executeBatchDelete() });
 }
 function cancelBatchDeleteModal() {
   const modal = document.getElementById('batch-delete-modal');
   if (modal) modal.classList.remove('show');
+  const cb = __pendingGenericCancel; __pendingGenericConfirm = null; __pendingGenericCancel = null;
+  if (cb) { try { cb(); } catch (e) {} }
 }
 async function confirmBatchDeleteModal() {
   const modal = document.getElementById('batch-delete-modal');
   if (modal) modal.classList.remove('show');
+  const cb = __pendingGenericConfirm; __pendingGenericConfirm = null; __pendingGenericCancel = null;
+  if (cb) { try { await cb(); } catch (err) { console.error(err); showToast('操作失败，请重试', 'error'); } return; }
+  await executeBatchDelete();
+}
+async function executeBatchDelete() {
   const ids = Array.from(libSelectedIds); if (!ids.length) return;
   for (const id of ids) {
     const item = DB.items.find(i => i.id === id); if (!item) continue;
@@ -1654,6 +1954,18 @@ function renderDetailPanel() {
   if(document.getElementById('add-link-row')) document.getElementById('add-link-row').style.display = 'flex';
   if(document.getElementById('shot-upload-btn')) document.getElementById('shot-upload-btn').style.display = 'flex';
   if(document.getElementById('detail-footer')) document.getElementById('detail-footer').style.display = 'flex';
+
+  // 🆕 v1.6.0：详情预览条（shots-grid）不管用户怎么选都一次性全部加载好，永远 0.85 压缩小图；
+  // 只有加载后确实多出了缓存（有图从没缓存变成有缓存），且仍是当前素材时才重画一次——
+  // 没新缓存就不重画，避免加载失败／缓存没写入时反复重画。
+  const _dpShots = (item.shots || []).filter(s => s.type !== 'reel');
+  const _dpMissing = () => _dpShots.filter(s => !window.stripBlobCache[s.id]).length;
+  if (_dpShots.length && _dpMissing() > 0) {
+    const _dpBefore = _dpMissing();
+    ensureItemStripBlobsLoaded(item).then(() => {
+      if (selectedId === item.id && _dpMissing() < _dpBefore) renderDetailPanel();
+    }).catch(() => {});
+  }
 }
 
 function addLinkFromInput() {
@@ -1711,7 +2023,9 @@ async function handleShotUpload(e) {
         const w = await fh.createWritable(); await w.write(f); await w.close();
         shot.fileName = fName;
         item.shots.push(shot);
-        setShotBlob(sId, f); count++; seq++;
+        // 2026-11-27：显示用的地址必须从刚写好的那份文件生成，不能拿桌面原文件 f——
+        // 原文件一删，blob: 地址就失效，详情面板再打开就是空白（缓存还留着失效地址）。
+        setShotBlob(sId, await fh.getFile()); count++; seq++;
       } catch(err) {}
     }
     if (count > 0 && !item.shots.some(s => s.pinned)) item.shots[0].pinned = true;
@@ -1743,14 +2057,14 @@ function pinShot(idx) { const it=DB.items.find(x=>x.id===selectedId); if(it) { s
 async function deleteCurrentItem(isCtx = false) {
 
   const id = isCtx ? ctxCardId : selectedId; const item = DB.items.find(i => i.id === id); if (!item) return;
-  if (!confirm(`确认将该档案彻底移入物理防丢回收站内？(文件将发生物理移位)`)) return;
-  
-  const trashObj = { id: uid(), type: 'item', data: item, deletedAt: Date.now() };
-  if (dirHandle) await moveFs(dirHandle, getItemFolderPath(item), `已删除（回收站）/${sanitizeName(item.title)}_${item.id}`, false);
-  
-  DB.trash.push(trashObj); DB.items = DB.items.filter(i => i.id !== item.id);
-  if(selectedId === id) selectedId = null;
-  renderLibrary(); scheduleSave(); showToast('记录连带原图已安全封存在系统回收站内');
+  // 2026-11-27：原生 confirm() 改走插件通用确认弹窗。
+  openGenericConfirm({ title: '删除操作', body: '即将删除 1 项内容，移至回收站。', confirmLabel: '确定删除', danger: true, onConfirm: async () => {
+    const trashObj = { id: uid(), type: 'item', data: item, deletedAt: Date.now() };
+    if (dirHandle) await moveFs(dirHandle, getItemFolderPath(item), `已删除（回收站）/${sanitizeName(item.title)}_${item.id}`, false);
+    DB.trash.push(trashObj); DB.items = DB.items.filter(i => i.id !== item.id);
+    if(selectedId === id) selectedId = null;
+    renderLibrary(); scheduleSave(); showToast('记录连带原图已安全封存在系统回收站内');
+  }});
 }
 
 async function deleteShot(idx) {
@@ -1873,13 +2187,15 @@ async function ctxDelete() {
   if(document.getElementById('ctx-cat')) document.getElementById('ctx-cat').classList.remove('show');
   const cat = DB.categories.find(c => c.id === ctxCatId);
   if (!cat) return;
-  if (!confirm(`确认强制删除分类「${cat.name}」？\n该目录下的所有素材将降级为「未分类」状态，文件不会被删除。`)) return;
+  // 2026-11-27：原生 confirm() 改走插件通用确认弹窗。
+  openGenericConfirm({ title: '删除操作', body: `确定删除分类「${cat.name}」？该分类下的素材将变为「未分类」，文件不会被删除。`, confirmLabel: '确定删除', danger: true, onConfirm: () => {
   const affectedCount = DB.items.filter(it => it.categoryId === ctxCatId).length;
   DB.items.forEach(it => { if (it.categoryId === ctxCatId) it.categoryId = ''; });
   DB.categories = DB.categories.filter(c => c.id !== ctxCatId);
   if (currentFilter.type === 'category' && currentFilter.value === ctxCatId) currentFilter = { type: 'all' };
   ctxCatId = null;
   scheduleSave(); renderLibrary(); showToast('✅ 分类目录已强制清除');
+  }});
 }
 
 // 卡片右键 → 编辑属性
@@ -1912,20 +2228,24 @@ async function handleImportJSON(e) {
     const data = safeJsonParse(text);
     const itemCount = (data.items || []).length;
     const catCount = (data.categories || []).length;
-    if (!confirm(`确认导入此 JSON 备份？\n检测到 ${itemCount} 条素材 / ${catCount} 个分类\n\n⚡ 已存在相同 ID 的记录将被自动跳过，安全合并。`)) {
-      e.target.value = ''; return;
-    }
-    let newItems = 0, newCats = 0;
-    if (Array.isArray(data.categories)) {
-      data.categories.forEach(c => { if (!DB.categories.find(x => x.id === c.id)) { DB.categories.push(c); newCats++; } });
-    }
-    if (Array.isArray(data.items)) {
-      data.items.forEach(it => { if (!DB.items.find(x => x.id === it.id)) { DB.items.unshift(it); newItems++; } });
-    }
-    e.target.value = '';
-    if(document.getElementById('import-modal')) document.getElementById('import-modal').classList.remove('show');
-    scheduleSave(); renderLibrary();
-    showToast(`✅ 成功导入 ${newItems} 条素材、${newCats} 个分类`);
+    // 2026-11-27：原生 confirm() 改走插件通用确认弹窗；取消时清空文件选择。
+    const _importInput = e.target;
+    openGenericConfirm({ title: '导入确认', body: `检测到 ${itemCount} 条素材 / ${catCount} 个分类。已存在相同 ID 的记录将被自动跳过，安全合并。`, confirmLabel: '确定导入', danger: false,
+      onConfirm: () => {
+        let newItems = 0, newCats = 0;
+        if (Array.isArray(data.categories)) {
+          data.categories.forEach(c => { if (!DB.categories.find(x => x.id === c.id)) { DB.categories.push(c); newCats++; } });
+        }
+        if (Array.isArray(data.items)) {
+          data.items.forEach(it => { if (!DB.items.find(x => x.id === it.id)) { DB.items.unshift(it); newItems++; } });
+        }
+        _importInput.value = '';
+        if(document.getElementById('import-modal')) document.getElementById('import-modal').classList.remove('show');
+        scheduleSave(); renderLibrary();
+        showToast(`✅ 成功导入 ${newItems} 条素材、${newCats} 个分类`);
+      },
+      onCancel: () => { _importInput.value = ''; }
+    });
   } catch(err) {
     e.target.value = '';
     showToast('❌ JSON 文件解析失败：格式不匹配或文件已损坏', 'error');
@@ -1938,12 +2258,18 @@ async function handleImportWSJSON(e) {
     const text = await file.text();
     const data = safeJsonParse(text);
     if (!data.workspace) { e.target.value = ''; showToast('❌ 文件格式不正确，非工作台备份文件', 'error'); return; }
-    if (!confirm('确认导入工作台备份？当前工作台数据将被此备份覆盖。')) { e.target.value = ''; return; }
-    WS = Object.assign(WS, data.workspace);
-    e.target.value = '';
-    if(document.getElementById('import-modal')) document.getElementById('import-modal').classList.remove('show');
-    scheduleSave();
-    showToast('✅ 工作台数据已成功恢复');
+    // 2026-11-27：原生 confirm() 改走插件通用确认弹窗；取消时清空文件选择。
+    const _wsInput = e.target;
+    openGenericConfirm({ title: '导入确认', body: '当前工作台数据将被此备份覆盖。', confirmLabel: '确定导入', danger: false,
+      onConfirm: () => {
+        WS = Object.assign(WS, data.workspace);
+        _wsInput.value = '';
+        if(document.getElementById('import-modal')) document.getElementById('import-modal').classList.remove('show');
+        scheduleSave();
+        showToast('✅ 工作台数据已成功恢复');
+      },
+      onCancel: () => { _wsInput.value = ''; }
+    });
   } catch(err) {
     e.target.value = '';
     showToast('❌ 工作台备份文件解析失败', 'error');
@@ -1999,7 +2325,8 @@ document.addEventListener('paste', async (e) => {
       const w = await fh.createWritable(); await w.write(file); await w.close();
       shot.fileName = fName;
       item.shots.push(shot);
-      setShotBlob(sId, file);
+      // 2026-11-27：显示用的地址必须从刚写好的那份文件生成，不能拿剪贴板原文件（见上传处同款修复）。
+      setShotBlob(sId, await fh.getFile());
       count++; seq++;
     } catch(err) {}
   }
@@ -2053,13 +2380,16 @@ async function handleCardImgCtx(action) {
   }
   
   if (action === 'delete') {
-    if (!confirm(`确认将「${item.title}」移入物理防丢回收站？`)) return;
-    const trashObj = { id: uid(), type: 'item', data: item, deletedAt: Date.now() };
-    if (dirHandle) await moveFs(dirHandle, getItemFolderPath(item), `已删除（回收站）/${sanitizeName(item.title)}_${item.id}`, false);
-    DB.trash.push(trashObj); DB.items = DB.items.filter(i => i.id !== item.id);
-    if (selectedId === ctxCardImgId) selectedId = null;
-    ctxCardImgId = null;
-    renderLibrary(); scheduleSave(); showToast('记录已移入回收站');
+    // 2026-11-27：原生 confirm() 改走插件通用确认弹窗。
+    openGenericConfirm({ title: '删除操作', body: '即将删除 1 项内容，移至回收站。', confirmLabel: '确定删除', danger: true, onConfirm: async () => {
+      const trashObj = { id: uid(), type: 'item', data: item, deletedAt: Date.now() };
+      if (dirHandle) await moveFs(dirHandle, getItemFolderPath(item), `已删除（回收站）/${sanitizeName(item.title)}_${item.id}`, false);
+      DB.trash.push(trashObj); DB.items = DB.items.filter(i => i.id !== item.id);
+      if (selectedId === ctxCardImgId) selectedId = null;
+      ctxCardImgId = null;
+      renderLibrary(); scheduleSave(); showToast('记录已移入回收站');
+    }});
+    return;
   }
 }
 
@@ -2555,7 +2885,9 @@ function renderNineMindmap(item, container) {
   const dateKeys = Object.keys(groups).sort();
   
   const coverEntry = shotsWithIdx.find(x => x.s.pinned) || shotsWithIdx[0];
-  const coverSrc = coverEntry ? getShotSrc(coverEntry.s) : '';
+  // 安全审计 2026-11-27（C-03）：coverSrc 直接拼进 src="..."，导入备份里 dataUrl 带引号可跳出属性注入；只放行 blob:/data:image:，再转义一次（与 getShotImgHtml 同一白名单）。
+  const _coverRaw = coverEntry ? getShotSrc(coverEntry.s) : '';
+  const coverSrc = (_coverRaw && /^(blob:|data:image\/)/i.test(_coverRaw)) ? _coverRaw : '';
   
   const renderNode = (dateKey) => {
     const list = groups[dateKey];
@@ -2574,12 +2906,13 @@ function renderNineMindmap(item, container) {
   const leftKeys = dateKeys.filter((_, i) => i % 2 === 0);
   const rightKeys = dateKeys.filter((_, i) => i % 2 === 1);
   
+  // 安全审计 2026-11-27（C-02）：中央标题原样拼进 innerHTML，恶意标题会执行；改为转义（见下行 escapeHtml）。
   container.innerHTML = `<div class="mindmap-wrap">
     <div class="mindmap-col left">${leftKeys.map(renderNode).join('')}</div>
     <div class="mindmap-center">
       <div class="mindmap-spine"></div>
-      ${coverSrc ? `<img class="mindmap-center-img" src="${coverSrc}">` : `<div class="mindmap-center-img" style="width:280px;height:280px;display:flex;align-items:center;justify-content:center;"><i class="ti ti-photo" style="font-size:40px;color:var(--txm)"></i></div>`}
-      <div class="mindmap-center-label">${item.title}</div>
+      ${coverSrc ? `<img class="mindmap-center-img" src="${escapeHtml(coverSrc)}">` : `<div class="mindmap-center-img" style="width:280px;height:280px;display:flex;align-items:center;justify-content:center;"><i class="ti ti-photo" style="font-size:40px;color:var(--txm)"></i></div>`}
+      <div class="mindmap-center-label">${escapeHtml(item.title)}</div>
     </div>
     <div class="mindmap-col right">${rightKeys.map(renderNode).join('')}</div>
   </div>`;
@@ -2778,23 +3111,82 @@ function navGallery(dir, e) { if(e) e.stopPropagation(); if (galleryShots.length
 function closeLightbox() { if(document.getElementById('lightbox')) document.getElementById('lightbox').classList.remove('show'); resetGalleryZoom(); }
 
 // 🆕 v1.3：大图查看模式下，鼠标滚轮缩放查看细节（左右切图、关闭等其他交互保持不变）
+// 🆕 v1.6.0：滚轮以鼠标位置为中心局部放大（不是只会居中放大）；放大后按住拖动可上下左右看局部；
+// 拖动不再出原生拖拽小图＋红叉（那是浏览器以为要把图片拖走）；键盘左右键切图。
 let galleryZoom = 1;
+let galleryPanX = 0, galleryPanY = 0; // 放大后的平移（像素），跟着拖动走
+let galleryDragging = false, galleryDragStartX = 0, galleryDragStartY = 0, galleryDragPanX = 0, galleryDragPanY = 0;
 const GALLERY_ZOOM_MIN = 1, GALLERY_ZOOM_MAX = 4, GALLERY_ZOOM_STEP = 0.15;
-function resetGalleryZoom() {
-  galleryZoom = 1;
+function applyGalleryTransform() {
   const img = document.getElementById('lightbox-img');
-  if (img) { img.style.transform = 'scale(1)'; img.style.cursor = 'zoom-in'; }
+  if (!img) return;
+  img.style.transform = `translate(${galleryPanX.toFixed(1)}px, ${galleryPanY.toFixed(1)}px) scale(${galleryZoom.toFixed(2)})`;
+  img.style.cursor = galleryZoom > 1 ? (galleryDragging ? 'grabbing' : 'grab') : 'zoom-in';
+}
+function clampGalleryPan() {
+  const img = document.getElementById('lightbox-img');
+  if (!img) return;
+  // 平移最多到图片边缘刚好贴住容器中心：图永远盖着屏幕中心，拖不出去，也拖不丢。
+  // 注意不能按“图片比容器大才许动”来夹——小倍数放大时图比容器小，那样会把跟随鼠标的平移清零。
+  const maxX = (img.offsetWidth * galleryZoom) / 2;
+  const maxY = (img.offsetHeight * galleryZoom) / 2;
+  galleryPanX = Math.max(-maxX, Math.min(maxX, galleryPanX));
+  galleryPanY = Math.max(-maxY, Math.min(maxY, galleryPanY));
+}
+function resetGalleryZoom() {
+  galleryZoom = 1; galleryPanX = 0; galleryPanY = 0; galleryDragging = false;
+  applyGalleryTransform();
 }
 (function initGalleryWheelZoom() {
   const img = document.getElementById('lightbox-img');
   if (!img) return; // 静态元素，页面加载时就存在，此处一次性绑定即可，无需在每次 renderLightbox 时重复绑定
   img.addEventListener('wheel', function (e) {
     e.preventDefault(); e.stopPropagation();
+    const box = document.getElementById('lightbox');
+    if (!box) return;
+    const oldZoom = galleryZoom;
     const delta = e.deltaY > 0 ? -GALLERY_ZOOM_STEP : GALLERY_ZOOM_STEP;
     galleryZoom = Math.min(GALLERY_ZOOM_MAX, Math.max(GALLERY_ZOOM_MIN, galleryZoom + delta));
-    img.style.transform = `scale(${galleryZoom.toFixed(2)})`;
-    img.style.cursor = galleryZoom > 1 ? 'zoom-out' : 'zoom-in';
+    if (galleryZoom === oldZoom) return; // 已经到顶／到底了，不用动
+    // 以鼠标位置为中心：先算鼠标离图片布局中心的距离，再按缩放比换算平移，
+    // 保证鼠标指的那一点放大后还在鼠标下面（居中放大是把这一点推走了）。
+    const boxR = box.getBoundingClientRect();
+    const cx = e.clientX - (boxR.left + img.offsetLeft + img.offsetWidth / 2);
+    const cy = e.clientY - (boxR.top + img.offsetTop + img.offsetHeight / 2);
+    const ratio = galleryZoom / oldZoom;
+    galleryPanX = cx - (cx - galleryPanX) * ratio;
+    galleryPanY = cy - (cy - galleryPanY) * ratio;
+    if (galleryZoom === 1) { galleryPanX = 0; galleryPanY = 0; }
+    clampGalleryPan();
+    applyGalleryTransform();
   }, { passive: false });
+  // 放大后拖动看局部：只在放大了以后才拖，没放大拖了也没用
+  img.addEventListener('pointerdown', function (e) {
+    if (galleryZoom <= 1) return;
+    if (e.button !== undefined && e.button !== 0) return; // 只响应左键
+    galleryDragging = true;
+    galleryDragStartX = e.clientX; galleryDragStartY = e.clientY;
+    galleryDragPanX = galleryPanX; galleryDragPanY = galleryPanY;
+    try { img.setPointerCapture(e.pointerId); } catch (err) {}
+    img.style.cursor = 'grabbing';
+    e.preventDefault();
+  });
+  img.addEventListener('pointermove', function (e) {
+    if (!galleryDragging) return;
+    galleryPanX = galleryDragPanX + (e.clientX - galleryDragStartX);
+    galleryPanY = galleryDragPanY + (e.clientY - galleryDragStartY);
+    clampGalleryPan();
+    applyGalleryTransform();
+  });
+  function endGalleryDrag() {
+    if (!galleryDragging) return;
+    galleryDragging = false;
+    applyGalleryTransform();
+  }
+  img.addEventListener('pointerup', endGalleryDrag);
+  img.addEventListener('pointercancel', endGalleryDrag);
+  // 原生图片拖拽会出小缩略图＋红叉（浏览器以为要把图片拖走），直接禁掉，拖动只走上面的平移
+  img.addEventListener('dragstart', function (e) { e.preventDefault(); });
 })();
 
 document.addEventListener('click', e => { 
@@ -3164,6 +3556,17 @@ function downloadText(txt, fn, type) {
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') { 
     closeLightbox(); closeNineGridModal(); 
+  }
+  // 🆕 v1.6.0：灯箱开着时，键盘左右键切换上一张／下一张（不用只点两边的箭头）。
+  // 带 Ctrl/Cmd 的左右键是九宫格里移动位置的快捷键，这里只接不带修饰键的。
+  if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    const lb = document.getElementById('lightbox');
+    if (lb && lb.classList.contains('show')) {
+      const active = document.activeElement;
+      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT')) return;
+      e.preventDefault();
+      navGallery(e.key === 'ArrowLeft' ? -1 : 1);
+    }
   }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') { e.preventDefault(); openAddModal(); }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); scheduleSave(); showToast('手动保存触发成功','success'); }
